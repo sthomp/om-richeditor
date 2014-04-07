@@ -18,7 +18,7 @@
                 :optimizations :none
                 :source-map true}}
 
-             {:id "main"
+             {:id "example_bootstrap"
               :source-paths ["src" "examples/bootstrap/src"]
               :compiler {
                 :output-to "examples/bootstrap/om-richeditor.js"
