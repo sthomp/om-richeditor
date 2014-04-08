@@ -1,6 +1,5 @@
 .DS_Store
-/out
-/examples/out
+**/out/**
 *.js
 *.js.map
 /target
