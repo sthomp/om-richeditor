@@ -17,8 +17,6 @@
 
 
 
-(JSON/parse "{\"list\": \"[1,2,3,4,5]\", \"blah\": \"vtha\", \"o\": {\"answer\": \"42\"}}")
-
 (defn set-cursor [range]
   (let [selection (-> js/window .getSelection)]
     (.removeAllRanges selection)
@@ -58,9 +56,10 @@
     om/IDidMount
     (did-mount [this]
                (let [node (om/get-node (nth (:dom data) 0))
-                     rng (-> js/document .createRange)]
+                     rng (-> js/document .createRange)
+                     child (.-firstChild node)]
                  (println (.getAttribute node "data-row"))
-                 (.setStart rng node 1)
+                 (.setStart rng child 1)
                  (.collapse rng)
                  (set-cursor rng)))))
 
