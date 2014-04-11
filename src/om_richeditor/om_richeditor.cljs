@@ -19,7 +19,7 @@
 (def data2 {:type "a" :text "Some Terminal Node" :href "http://www.google.com"})
 (def data3 [{:type "a" :text "Some Terminal Node" :href "http://www.google.com"}
             {:type "span" :text "Hello world "}])
-(def data4 [{:type "a" :text "Some Terminal Node" :href "http://www.google.com"}
+(def data4 [{:type "a" :text "Some Terminal Node2" :href "http://www.google.com"}
             {:type "span" :text "Hello world "}
             {:type "p" :children [{:type "span" :text "Child1"}
                                   {:type "span" :text "Child2"}]}])
@@ -80,43 +80,37 @@
     (render-state [this state]
                   (json-terminal-node->om-node data))))
 
-;;                   (apply dom/pre nil
-;;                          (map #(om/build comp-terminal-node %) data))
 
-;; (apply dom/pre nil
-;;                          (map (fn [child]
-;;                            (println child)
-;;                            (if (contains? child :children)
-;;                              (apply dom/p nil
-;;                                     (om/build-all comp-node-with-children (:children child)))
-;;                              ((om/build comp-terminal-node child))) data)))
+
+
 (defn comp-node-with-children [data owner]
   (reify
     om/IRenderState
     (render-state [this state]
+                  (println "Building with data: " data)
                   (apply dom/pre nil
                          (map (fn [child]
-                           (println child)
+                           (println "Processing child: " child)
                            (if (contains? child :children)
                              (do
                                (println "contains children")
                                (println (:children child))
-                               (dom/span nil "children")
-                               (apply dom/div nil
-                                      om/build comp-node-with-children (:children child)))
+                               (let [build-all-node (apply dom/div nil
+                                      om/build-all comp-node-with-children2 (:children child))]
+                                 (println (dom/render-to-str build-all-node)))
+                               (om/build comp-node-with-children (:children child)))
                              (do
                                (println "no children")
                                (om/build comp-terminal-node child)))) data)))))
 
-(defn comp-node [data owner]
-  (reify
-    om/IRenderState
-    (render-state [this state]
 
-                  (dom/p nil "editor"))))
+(do
+  (println "------------")
+  (dom/render-to-str (om/build comp-node-with-children data4)))
 
-(om/root comp-node-with-children data3
+(om/root comp-node-with-children data4
   {:target (. js/document (getElementById "editor"))})
+
 
 (defn inner-widget [data owner]
   (reify
