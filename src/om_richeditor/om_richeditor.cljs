@@ -26,6 +26,7 @@
 
 
 
+
 (def app-state (atom {:dom [(dom/p #js {:data-row 0} "Row1")
                             (dom/p #js {:data-row 1} "Row2")
                             (dom/p #js {:data-row 2} "Row3")]
@@ -80,8 +81,27 @@
     (render-state [this state]
                   (json-terminal-node->om-node data))))
 
+(defn comp-node [data owner]
+  (reify
+    om/IRenderState
+    (render-state [this state]
+                  (if (contains? data :children)
+                    (do
+                      (println "contains children")
+                      (:type data)
+                      (apply dom/pre nil
+                             (om/build-all comp-node (:children data))))
+                    (do
+                      (println "no children")
+                      (om/build comp-terminal-node data))))))
 
 
+(defn comp-richeditor [data owner]
+  (reify
+    om/IRenderState
+    (render-state [this state]
+                  (apply dom/div #js {:contentEditable true}
+                         (om/build-all comp-node data)))))
 
 (defn comp-node-with-children [data owner]
   (reify
@@ -108,7 +128,7 @@
   (println "------------")
   (dom/render-to-str (om/build comp-node-with-children data4)))
 
-(om/root comp-node-with-children data4
+(om/root comp-richeditor data4
   {:target (. js/document (getElementById "editor"))})
 
 
