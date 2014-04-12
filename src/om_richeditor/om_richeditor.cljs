@@ -13,7 +13,7 @@
                                   {:type "span" :text "Child2"}]}])
 
 (def data4 [{:type "a" :text "Some Terminal Node2" :attrs {:href "http://www.google.com" :rel "nofollow" :target "_blank"}}
-            {:type "span" :text "Hello world "}
+            {:type "span" :text "Hello world"}
             {:type "p" :children [{:type "span" :text "Child1"}
                                   {:type "span" :text "Child2"}
                                   {:type "p" :children [{:type "span" :text "GrandChild1"}
@@ -23,19 +23,16 @@
             {:type "p" :text "Another line..."}])
 
 
-
-
-(def app-state (atom {:dom [(dom/p #js {:data-row 0} "Row1")
-                            (dom/p #js {:data-row 1} "Row2")
-                            (dom/p #js {:data-row 2} "Row3")]
-                      :cursor {:focusOffset 0
-                               :anchorOffset 0}}))
-
-
 (defn set-cursor [range]
   (let [selection (-> js/window .getSelection)]
     (.removeAllRanges selection)
     (.addRange selection range)
+    nil))
+
+(defn get-dom-cursor []
+  (let [selection (-> js/window .getSelection)]
+    (.log js/console (.-focusNode selection))
+    (.log js/console (.-anchorNode selection))
     nil))
 
 (defn json-terminal-node->om-node
@@ -46,8 +43,6 @@
      (let [text (:text json-node)
            attrs (merge (:attrs json-node) additional-attrs)
            js-attrs (clj->js attrs)]
-       (println js-attrs)
-       (println json-node)
        (case (:type json-node)
          "span" (dom/span js-attrs text)
          "em" (dom/em js-attrs text)
@@ -61,8 +56,27 @@
   (reify
     om/IRenderState
     (render-state [this state]
-                  (let [node (json-terminal-node->om-node data {:contentEditable true :onKeyDown #(println "blah2")})]
-                    node))))
+                  (let [node (json-terminal-node->om-node data {:contentEditable true
+                                                                :onKeyDown (fn [e]
+                                                                             (.preventDefault e)
+                                                                             (om/transact! data :text (fn [curr-val] (str curr-val (.fromCharCode js/String (.-keyCode e))))))
+                                                                :onMouseDown (fn [e]
+                                                                               (println "mouseDown")
+                                                                               (get-dom-cursor))
+                                                                :onMouseUp (fn [e]
+                                                                               (println "mouseUp")
+                                                                               (get-dom-cursor))})]
+                    node))
+    om/IDidUpdate
+    (did-update [this prev-props prev-state]
+                (println "Updating a terminal component")
+                (let [node (om/get-node owner)
+                      rng (-> js/document .createRange)
+                      child (.-firstChild node)]
+                  (.selectNode rng child)
+                  (.collapse rng false)
+                  (set-cursor rng))
+                 )))
 
 (defn comp-node [data owner]
   (reify
