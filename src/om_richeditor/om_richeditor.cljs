@@ -13,13 +13,10 @@
   {:dom [{:type "p" :children [{:type "span" :text "Hello world "}
                                {:type "em" :text "this is emphasized"}
                                {:type "span" :text " this is regular "}
-                               {:type "a" :text "this is a link" :href "http://www.google.com"}]}
+                               {:type "a" :text "this is a link" :attrs {:href "http://www.google.com" :rel "nofollow" :target "_blank"}}]}
          {:type "p" :text "Next Paragraph"}]})
 
-(def data2 {:type "a" :text "Some Terminal Node" :href "http://www.google.com"})
-(def data3 [{:type "a" :text "Some Terminal Node" :href "http://www.google.com"}
-            {:type "span" :text "Hello world "}])
-(def data4 [{:type "a" :text "Some Terminal Node2" :href "http://www.google.com"}
+(def data4 [{:type "a" :text "Some Terminal Node2" :attrs {:href "http://www.google.com" :rel "nofollow" :target "_blank"}}
             {:type "span" :text "Hello world "}
             {:type "p" :children [{:type "span" :text "Child1"}
                                   {:type "span" :text "Child2"}]}])
@@ -40,40 +37,19 @@
     (.addRange selection range)
     nil))
 
-(defn construct-node-with-children [data owner]
-  (reify
-    om/IRenderState
-    (render-state [this state]
-                  (println "node-with-children")
-                  (om/build-all
-                     json-node->om-node
-                     (:dom data)
-                     {:init-state state}))))
-
 (defn json-terminal-node->om-node [json-node]
-  (let [text (:text json-node)]
+  "attrs is an *optional* map of attributes. If none is specified then nil will be used."
+  ;; If attrs is specified then we need to do: #js attrs. otherwise, nil.
+  (let [text (:text json-node)
+        js-attrs (clj->js (:attrs json-node))]
     (case (:type json-node)
-      "span" (dom/span nil text)
-      "em" (dom/em nil text)
-      "p" (dom/p nil text)
-      "a" (dom/a #js {:href "http://www.yahoo.com" :rel "nofollow" :target "_blank"} text)
+      "span" (dom/span js-attrs text)
+      "em" (dom/em js-attrs text)
+      "p" (dom/p js-attrs text)
+      "a" (dom/a js-attrs text)
       (throw (js/Error. (str "Unknown node type: " (:type json-node)))))))
 
-
-(defn construct-terminal-node [data owner]
-  (reify
-    om/IRenderState
-    (render-state [this state]
-                  (println "terminal-node")
-                  (let [om-node (json-terminal-node->om-node data)]
-                    (println om-node))
-                  (dom/span nil ()))))
-
-(defn json-node->om-node [json-node]
-  (if (contains? json-node :children)
-    (construct-node-with-children (:children json-node owner))
-    (construct-terminal-node)))
-
+(dom/render-to-str (json-terminal-node->om-node (nth data4 0)))
 
 (defn comp-terminal-node [data owner]
   (reify
@@ -103,72 +79,9 @@
                   (apply dom/div #js {:contentEditable true}
                          (om/build-all comp-node data)))))
 
-(defn comp-node-with-children [data owner]
-  (reify
-    om/IRenderState
-    (render-state [this state]
-                  (println "Building with data: " data)
-                  (apply dom/pre nil
-                         (map (fn [child]
-                           (println "Processing child: " child)
-                           (if (contains? child :children)
-                             (do
-                               (println "contains children")
-                               (println (:children child))
-                               (let [build-all-node (apply dom/div nil
-                                      om/build-all comp-node-with-children2 (:children child))]
-                                 (println (dom/render-to-str build-all-node)))
-                               (om/build comp-node-with-children (:children child)))
-                             (do
-                               (println "no children")
-                               (om/build comp-terminal-node child)))) data)))))
-
-
 (do
   (println "------------")
-  (dom/render-to-str (om/build comp-node-with-children data4)))
+  (dom/render-to-str (om/build comp-richeditor data4)))
 
 (om/root comp-richeditor data4
   {:target (. js/document (getElementById "editor"))})
-
-
-(defn inner-widget [data owner]
-  (reify
-    om/IRenderState
-    (render-state [this state]
-                  (println "blah")
-                  data)))
-
-(defn widget [data owner]
-  (reify
-    om/IRenderState
-    (render-state [this state]
-      (dom/div #js {:contentEditable true
-                    :onKeyDown (fn [e]
-                                 (println (-> js/window
-                                              .getSelection
-                                              .-focusOffset))
-                                 (.preventDefault e)
-                                 (println (.-keyCode e))
-                                 (case (.-keyCode e)
-                                   13 (om/transact! data :dom
-                                                    (fn [xs]
-                                                      (let [len (-> xs count inc)
-                                                             new-node (dom/p #js {:data-row len} (str "Row" len))]
-                                                         (conj xs new-node))))
-                                   nil))}
-               (apply dom/ul nil
-                      (om/build-all inner-widget (:dom data)
-                                    {:init-state state}))))
-    om/IDidMount
-    (did-mount [this]
-               (let [node (om/get-node (nth (:dom data) 0))
-                     rng (-> js/document .createRange)
-                     child (.-firstChild node)]
-                 (println (.getAttribute node "data-row"))
-                 (.setStart rng child 1)
-                 (.collapse rng)
-                 (set-cursor rng)))))
-
-
-
