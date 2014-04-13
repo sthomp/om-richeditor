@@ -2,7 +2,7 @@
   (:require-macros [cljs.core.async.macros :refer [go]])
   (:require [om.core :as om :include-macros true]
             [om.dom :as dom :include-macros true]
-            [cljs.core.async :refer [put! chan <!]]
+            [cljs.core.async :refer [put! chan <! close!]]
             [clojure.data :as data]
             [clojure.string :as string]))
 
@@ -33,7 +33,8 @@
   (let [selection (-> js/window .getSelection)]
     (.log js/console (.-focusNode selection))
     (.log js/console (.-anchorNode selection))
-    nil))
+    (.log js/console (.. selection -anchorNode -parentNode))
+    selection))
 
 (defn json-terminal-node->om-node
   "additional-attrs is an *optional* map of additional attributes."
@@ -50,33 +51,39 @@
          "a" (dom/a js-attrs text)
          (throw (js/Error. (str "Unknown node type: " (:type json-node))))))))
 
-;; (dom/render-to-str (json-terminal-node->om-node (nth data4 0) {:data-test "test"}))
 
 (defn comp-terminal-node [data owner]
   (reify
+    om/IInitState
+    (init-state [_]
+                {:keypress-chan (chan)})
+    om/IWillMount
+    (will-mount [_]
+                (let [keypress-chan (om/get-state owner :keypress-chan)]
+                  (go (loop []
+                        (let [key-code (<! keypress-chan)
+                              char (.fromCharCode js/String key-code)
+                              node (om/get-node owner)]
+                          (println "I got a keypress!" node char)
+                          (om/transact! data :text
+                                        (fn [xs] (str xs char))))
+                        (recur)))))
     om/IRenderState
     (render-state [this state]
-                  (let [node (json-terminal-node->om-node data {:contentEditable true
-                                                                :onKeyDown (fn [e]
-                                                                             (.preventDefault e)
-                                                                             (om/transact! data :text (fn [curr-val] (str curr-val (.fromCharCode js/String (.-keyCode e))))))
-                                                                :onMouseDown (fn [e]
-                                                                               (println "mouseDown")
-                                                                               (get-dom-cursor))
-                                                                :onMouseUp (fn [e]
-                                                                               (println "mouseUp")
-                                                                               (get-dom-cursor))})]
+                  (let [node (json-terminal-node->om-node data {:onClick (fn [e]
+                                                                           (let [click-chan (om/get-shared owner :click-chan)
+                                                                                 keypress-chan (om/get-state owner :keypress-chan)]
+                                                                             (put! click-chan keypress-chan)))})]
                     node))
     om/IDidUpdate
     (did-update [this prev-props prev-state]
-                (println "Updating a terminal component")
+                ;; Update the cursor location
                 (let [node (om/get-node owner)
                       rng (-> js/document .createRange)
                       child (.-firstChild node)]
                   (.selectNode rng child)
                   (.collapse rng false)
-                  (set-cursor rng))
-                 )))
+                  (set-cursor rng)))))
 
 (defn comp-node [data owner]
   (reify
@@ -93,14 +100,34 @@
 
 (defn comp-richeditor [data owner]
   (reify
+    om/IInitState
+    (init-state [_]
+                {:keypress-chan nil})
+    om/IWillMount
+    (will-mount [_]
+                (let [click-chan (om/get-shared owner :click-chan)]
+                  (println "Starting go loop")
+                  (go (loop []
+                        (let [keypress-chan (<! click-chan)]
+                          (om/set-state! owner :keypress-chan keypress-chan))
+                        (recur)))))
     om/IRenderState
     (render-state [this state]
-                  (apply dom/div nil
+                  (apply dom/div #js {:contentEditable true
+                                      :onKeyDown (fn [e]
+                                                   #_(println "keydown"))
+                                      :onKeyPress (fn [e]
+                                                    #_(println "keypress")
+                                                    (when-let [keypress-chan (:keypress-chan (om/get-state owner))]
+                                                      (put! keypress-chan (.. e -which))))}
                          (om/build-all comp-node data)))))
 
 
-(om/root comp-richeditor data4
-  {:target (. js/document (getElementById "editor"))})
+(let [click-chan (chan)]
+  (om/root comp-richeditor data4
+           {:target (. js/document (getElementById "editor"))
+            :shared {:click-chan click-chan}}))
+
 
 ;; (do
 ;;   (println "------------")
