@@ -93,6 +93,10 @@
                   (println "Cursor dom-node: " data)
                   (dom/div nil nil))))
 
+(defn keycode->char [keycode]
+  (condp = keycode
+    32 "\u00a0"
+    (.fromCharCode js/String keycode)))
 
 (defn comp-terminal-node [data owner {cursor-cb :cursor-cb}]
   (reify
@@ -106,13 +110,14 @@
                   (go (loop []
                         (let [{:keys [keycode cursor]} (<! keypress-chan)
                               {:keys [focusOffset]} cursor
-                              char (.fromCharCode js/String keycode)
+                              char (keycode->char keycode)
                               node (om/get-node owner)]
                           (println "Terminal got a keypress!" node char cursor focusOffset)
                           (om/transact! data :text
                                         (fn [text]
                                           (str (subs text 0 focusOffset) char (subs text focusOffset))))
-                          (put! cursor-chan {:type :inc}))
+                          (cursor-cb {:type :inc})
+                          #_(put! cursor-chan {:type :inc}))
                         (recur)))))
     om/IRenderState
     (render-state [this state]
