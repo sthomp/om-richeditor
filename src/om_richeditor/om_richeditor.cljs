@@ -50,25 +50,38 @@
          "a" (dom/a js-attrs text)
          (throw (js/Error. (str "Unknown node type: " (:type json-node))))))))
 
-(defn comp-cursor [data owner {:keys [cursor-chan] :as opts}]
+
+;; TODO: Would it be better to user graft for this?
+(defn comp-cursor [data owner]
   (reify
     om/IWillMount
     (will-mount [this]
                 (go (loop []
-                      (let [cursor-cmd (<! cursor-chan)
+                      (let [cursor-cmd (<! (om/get-shared owner :cursor-chan))
                             cmd-type (:type cursor-cmd)
                             args (:args cursor-cmd)]
-                        (println "cursor-cmd" cursor-cmd)
                         (condp = cmd-type
-                         :add-chr (println "add-char")
+                         :add-chr
+                          (do
+                            (om/transact! data
+                                          (fn [xs] (assoc xs :focusOffset (inc (:focusOffset xs))))))
                          :backspace (println "backspace")
                          :del (println "del")
-                         :click (println "click")
-                         (println "Unknown cursor command")))
+                         :click
+                          (let [{:keys [dom-cursor]} args
+                                {:keys [focusOffset]} dom-cursor]
+                            (println "Cursor notified of click" dom-cursor)
+                            (om/transact! data
+                                          (fn [xs] (assoc xs :focusOffset focusOffset))))
+                         :render
+                          (let [dom-node (:dom-node args)]
+                            (om/set-state! owner :dom-node dom-node))
+                          (println "Unknown cursor command")))
                       (recur))))
     om/IRenderState
     (render-state [this state]
-                  (dom/div nil "Cursor"))))
+                  (println "Cursor dom-node: " (:dom-node state))
+                  (dom/div nil nil))))
 
 
 (defn comp-terminal-node [data owner]
@@ -78,32 +91,41 @@
                 {:keypress-chan (chan)})
     om/IWillMount
     (will-mount [_]
-                (let [keypress-chan (om/get-state owner :keypress-chan)]
+                (let [keypress-chan (om/get-state owner :keypress-chan)
+                      cursor-chan (om/get-shared owner :cursor-chan)]
                   (go (loop []
-                        (let [key-code (<! keypress-chan)
-                              char (.fromCharCode js/String key-code)
+                        (let [{:keys [keycode cursor]} (<! keypress-chan)
+                              {:keys [focusOffset]} cursor
+                              char (.fromCharCode js/String keycode)
                               node (om/get-node owner)]
-                          (println "I got a keypress!" node char)
+                          (println "Terminal got a keypress!" node char cursor focusOffset)
                           (om/transact! data :text
-                                        (fn [xs] (str xs char))))
+                                        (fn [text]
+                                          (str (subs text 0 focusOffset) char (subs text focusOffset))))
+                          (put! cursor-chan {:type :add-chr}))
                         (recur)))))
     om/IRenderState
     (render-state [this state]
-                  (let [node (json-terminal-node->om-node data {:onClick (fn [e]
-                                                                           (let [click-chan (om/get-shared owner :click-chan)
-                                                                                 keypress-chan (om/get-state owner :keypress-chan)]
-                                                                             (println "Current cursor: " (get-dom-cursor))
-                                                                             (put! click-chan keypress-chan)))})]
-                    node))
+                  (let [attrs {:onClick (fn [e]
+                                          (let [click-chan (om/get-shared owner :click-chan)
+                                                keypress-chan (om/get-state owner :keypress-chan)]
+                                            (println "Click from terminal: " @data (get-dom-cursor))
+                                            (.log js/console e)
+                                            #_(throw (js/Error. "Oops"))
+                                            (put! click-chan {:keypress-chan keypress-chan
+                                                              :dom-cursor (get-dom-cursor)})))}]
+                    (json-terminal-node->om-node data attrs)))
     om/IDidUpdate
     (did-update [this prev-props prev-state]
                 ;; Update the cursor location
                 (let [node (om/get-node owner)
                       rng (-> js/document .createRange)
-                      child (.-firstChild node)]
-                  (.selectNode rng child)
-                  (.collapse rng false)
-                  (set-dom-cursor rng)))))
+                      child (.-firstChild node)
+                      cursor-chan (om/get-shared owner :cursor-chan)]
+                  (put! cursor-chan {:type :render :args {:dom-node child}})
+                  #_(.selectNode rng child)
+                  #_(.collapse rng false)
+                  #_(set-dom-cursor rng)))))
 
 (defn comp-node [data owner]
   (reify
@@ -124,16 +146,16 @@
     om/IInitState
     (init-state [_]
                 {:keypress-chan nil   ;; This chan is set from child terminal nodes when they become focused so we can notify them of keypress
-                 :cursor-chan (chan)  ;; This chan is to send notifications to the cursor that something has changed
                  })
     om/IWillMount
     (will-mount [_]
                 (let [click-chan (om/get-shared owner :click-chan)]
                   (go (loop []
-                        (let [keypress-chan (<! click-chan)
-                              cursor-chan (om/get-state owner :cursor-chan)]
+                        (let [{:keys [keypress-chan dom-cursor]} (<! click-chan)
+                              cursor-chan (om/get-shared owner :cursor-chan)]
+                          (println "Testing cursor-chan")
                           (put! cursor-chan {:type :click
-                                             :args nil})
+                                             :args {:dom-cursor dom-cursor}})
                           (om/set-state! owner :keypress-chan keypress-chan))
                         (recur)))))
     om/IRenderState
@@ -146,15 +168,18 @@
                                                              #_(println "keypress")
                                                              (.preventDefault e)
                                                              (when-let [keypress-chan (:keypress-chan (om/get-state owner))]
-                                                               (put! keypress-chan (.. e -which))))}
+                                                               (put! keypress-chan {:keycode (.. e -which)
+                                                                                    :cursor (:cursor @data)})))}
                                   (om/build-all comp-node (:dom data)))
-                           (om/build comp-cursor (:cursor data) {:opts {:cursor-chan (:cursor-chan state)}})))))
+                           (om/build comp-cursor (:cursor data))))))
 
 
-(let [click-chan (chan)]
+(let [click-chan (chan)
+      cursor-chan (chan)]
   (om/root comp-richeditor data4
            {:target (. js/document (getElementById "editor"))
             :shared {:click-chan click-chan   ;; Notifies the richeditor when clicks happen on a terminal node
+                     :cursor-chan cursor-chan ;; This chan is to send notifications to the cursor that something has changed
                      }}))
 
 
