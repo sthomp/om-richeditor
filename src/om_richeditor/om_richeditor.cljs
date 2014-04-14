@@ -18,7 +18,10 @@
                                                                     {:type "p" :children [{:type "span" :text "GrandChild2"}
                                                                                           {:type "span" :text "GrandChild3"}]}]}]}
                         {:type "p" :text "Another line..."}]
-                  :cursor {:focusOffset 0}}))
+                  :cursor {:focusOffset 0
+                           :focusOwner nil
+                           :anchorOffset 0
+                           :anchorOwner nil}}))
 
 
 (defn set-dom-cursor [range]
@@ -34,6 +37,11 @@
      :focusOffset (.-focusOffset selection)
      :anchorOffset (.-anchorOffset selection)}))
 
+(defn dom-cursor->cursor [dom-cursor focusOwner anchorOwner]
+     {:focusOffset (:focusOffset dom-cursor)
+      :anchorOffset (:anchorOffset dom-cursor)
+      :focusOwner focusOwner
+      :anchorOwner anchorOwner})
 
 (defn json-terminal-node->om-node
   "additional-attrs is an *optional* map of additional attributes."
@@ -61,26 +69,28 @@
                             cmd-type (:type cursor-cmd)
                             args (:args cursor-cmd)]
                         (condp = cmd-type
-                         :add-chr
+                         :inc
                           (do
                             (om/transact! data
                                           (fn [xs] (assoc xs :focusOffset (inc (:focusOffset xs))))))
-                         :backspace (println "backspace")
-                         :del (println "del")
+                         :dec (println "dec")
                          :click
-                          (let [{:keys [dom-cursor]} args
-                                {:keys [focusOffset]} dom-cursor]
-                            (println "Cursor notified of click" dom-cursor)
-                            (om/transact! data
-                                          (fn [xs] (assoc xs :focusOffset focusOffset))))
+                          (let [{:keys [cursor]} args]
+                            (println "Cursor notified of click" cursor)
+                            (om/update! data cursor))
                          :render
-                          (let [dom-node (:dom-node args)]
-                            (om/set-state! owner :dom-node dom-node))
+                          (let [rng (-> js/document .createRange)
+                                owner (:focusOwner @data)
+                                focusOffset (:focusOffset @data)
+                                node (om/get-node owner)
+                                child (.-firstChild node)]
+                            (.setStart rng child focusOffset)
+                            (set-dom-cursor rng))
                           (println "Unknown cursor command")))
                       (recur))))
     om/IRenderState
     (render-state [this state]
-                  (println "Cursor dom-node: " (:dom-node state))
+                  (println "Cursor dom-node: " data)
                   (dom/div nil nil))))
 
 
@@ -102,7 +112,7 @@
                           (om/transact! data :text
                                         (fn [text]
                                           (str (subs text 0 focusOffset) char (subs text focusOffset))))
-                          (put! cursor-chan {:type :add-chr}))
+                          (put! cursor-chan {:type :inc}))
                         (recur)))))
     om/IRenderState
     (render-state [this state]
@@ -110,10 +120,8 @@
                                           (let [click-chan (om/get-shared owner :click-chan)
                                                 keypress-chan (om/get-state owner :keypress-chan)]
                                             (println "Click from terminal: " @data (get-dom-cursor))
-                                            (.log js/console e)
-                                            #_(throw (js/Error. "Oops"))
                                             (put! click-chan {:keypress-chan keypress-chan
-                                                              :dom-cursor (get-dom-cursor)})))}]
+                                                              :cursor (dom-cursor->cursor (get-dom-cursor) owner owner)})))}]
                     (json-terminal-node->om-node data attrs)))
     om/IDidUpdate
     (did-update [this prev-props prev-state]
@@ -122,10 +130,10 @@
                       rng (-> js/document .createRange)
                       child (.-firstChild node)
                       cursor-chan (om/get-shared owner :cursor-chan)]
-                  (put! cursor-chan {:type :render :args {:dom-node child}})
-                  #_(.selectNode rng child)
-                  #_(.collapse rng false)
-                  #_(set-dom-cursor rng)))))
+                  #_(put! cursor-chan {:type :render})
+                  (.selectNode rng child)
+                  (.collapse rng false)
+                  (set-dom-cursor rng)))))
 
 (defn comp-node [data owner]
   (reify
@@ -151,11 +159,11 @@
     (will-mount [_]
                 (let [click-chan (om/get-shared owner :click-chan)]
                   (go (loop []
-                        (let [{:keys [keypress-chan dom-cursor]} (<! click-chan)
+                        (let [{:keys [keypress-chan cursor]} (<! click-chan)
                               cursor-chan (om/get-shared owner :cursor-chan)]
                           (println "Testing cursor-chan")
                           (put! cursor-chan {:type :click
-                                             :args {:dom-cursor dom-cursor}})
+                                             :args {:cursor cursor}})
                           (om/set-state! owner :keypress-chan keypress-chan))
                         (recur)))))
     om/IRenderState
