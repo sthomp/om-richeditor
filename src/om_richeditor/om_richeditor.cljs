@@ -1,4 +1,4 @@
-(ns sthomp.om-richeditor.core
+(ns sthomp.om-richeditor
   (:require-macros [cljs.core.async.macros :refer [go]])
   (:require [om.core :as om :include-macros true]
             [om.dom :as dom :include-macros true]
@@ -124,7 +124,8 @@
                   (let [attrs {:onClick (fn [e]
                                           (let [click-chan (om/get-shared owner :click-chan)
                                                 keypress-chan (om/get-state owner :keypress-chan)]
-                                            (println "Click from terminal: " @data (get-dom-cursor))
+                                            #_(println "Click from terminal: " @data (get-dom-cursor))
+                                            (.log js/console (str "Click from terminal: " @data (get-dom-cursor)))
                                             (put! click-chan {:keypress-chan keypress-chan
                                                               :cursor (dom-cursor->cursor (get-dom-cursor) owner owner)})))}]
                     (json-terminal-node->om-node data attrs)))

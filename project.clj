@@ -22,4 +22,4 @@
                 :output-to "examples/bootstrap/om-richeditor.js"
                 :output-dir "examples/bootstrap/out"
                 :optimizations :none
-                :source-map "examples/bootstrap/app.js.map"}}]})
+                :source-map true}}]})
