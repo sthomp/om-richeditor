@@ -94,7 +94,7 @@
                   (dom/div nil nil))))
 
 
-(defn comp-terminal-node [data owner]
+(defn comp-terminal-node [data owner {cursor-cb :cursor-cb}]
   (reify
     om/IInitState
     (init-state [_]
@@ -131,11 +131,12 @@
                       child (.-firstChild node)
                       cursor-chan (om/get-shared owner :cursor-chan)]
                   #_(put! cursor-chan {:type :render})
-                  (.selectNode rng child)
-                  (.collapse rng false)
-                  (set-dom-cursor rng)))))
+                  (cursor-cb {:type :render})
+                  #_(.selectNode rng child)
+                  #_(.collapse rng false)
+                  #_(set-dom-cursor rng)))))
 
-(defn comp-node [data owner]
+(defn comp-node [data owner {cursor-cb :cursor-cb}]
   (reify
     om/IRenderState
     (render-state [this state]
@@ -143,9 +144,9 @@
                     (do
                       (:type data)   ;; TODO: Need to use the type as the node
                       (apply dom/pre nil
-                             (om/build-all comp-node (:children data))))
+                             (om/build-all comp-node (:children data) {:opts {:cursor-cb cursor-cb}})))
                     (do
-                      (om/build comp-terminal-node data))))))
+                      (om/build comp-terminal-node data {:opts {:cursor-cb cursor-cb}}))))))
 
 
 
@@ -170,6 +171,7 @@
     (render-state [this state]
                   (dom/div nil
                            (apply dom/div #js {:contentEditable true
+                                               :spellCheck false
                                                :onKeyDown (fn [e]
                                                             #_(println "keydown"))
                                                :onKeyPress (fn [e]
@@ -178,7 +180,25 @@
                                                              (when-let [keypress-chan (:keypress-chan (om/get-state owner))]
                                                                (put! keypress-chan {:keycode (.. e -which)
                                                                                     :cursor (:cursor @data)})))}
-                                  (om/build-all comp-node (:dom data)))
+                                  (om/build-all comp-node (:dom data) {:opts {:cursor-cb (fn [{cmd-type :type
+                                                                                               args :args}]
+                                                                                           (condp = cmd-type
+                                                                                             :inc (do
+                                                                                                    (om/transact! data :cursor
+                                                                                                                  (fn [xs] (assoc xs :focusOffset (inc (:focusOffset xs))))))
+                                                                                             :dec (println "dec")
+                                                                                             :click (let [{:keys [cursor]} args]
+                                                                                                      (println "Cursor notified of click" cursor)
+                                                                                                      (om/update! data cursor))
+                                                                                             :render (let [rng (-> js/document .createRange)
+                                                                                                           owner (-> data :cursor :focusOwner)
+                                                                                                           focusOffset (-> data :cursor :focusOffset)
+                                                                                                           node (om/get-node owner)
+                                                                                                           child (.-firstChild node)
+                                                                                                           ]
+                                                                                                       (.setStart rng child focusOffset)
+                                                                                                       (set-dom-cursor rng))
+                                                                                             (println "Unknown cursor command")))}}))
                            (om/build comp-cursor (:cursor data))))))
 
 
