@@ -4,7 +4,8 @@
             [om.dom :as dom :include-macros true]
             [cljs.core.async :refer [put! chan <! close!]]
             [clojure.data :as data]
-            [clojure.string :as string]))
+            [clojure.string :as string]
+            [goog.dom :as gdom]))
 
 
 (enable-console-print!)
@@ -17,29 +18,25 @@
                                                                     {:type "span" :text "GrandChild2"}
                                                                     {:type "p" :children [{:type "span" :text "GrandChild2"}
                                                                                           {:type "span" :text "GrandChild3"}]}]}]}
-                        {:type "p" :text "Another line..."}]
-                  :cursor {:focusOffset 0
-                           :focusOwner nil
-                           :anchorOffset 0
-                           :anchorOwner nil}}))
+                        {:type "p" :text "Another line..."}]}))
 
 
-(defn set-dom-cursor [range]
+(defn set-dom-caret [range]
   (let [selection (-> js/window .getSelection)]
     (.removeAllRanges selection)
     (.addRange selection range)
     nil))
 
-(defn get-dom-cursor []
+(defn get-dom-caret []
   (let [selection (-> js/window .getSelection)]
     {:focusNode (.-focusNode selection)
      :anchorNode (.-anchorNode selection)
      :focusOffset (.-focusOffset selection)
      :anchorOffset (.-anchorOffset selection)}))
 
-(defn dom-cursor->cursor [dom-cursor focusOwner anchorOwner]
-     {:focusOffset (:focusOffset dom-cursor)
-      :anchorOffset (:anchorOffset dom-cursor)
+(defn dom-caret->caret [dom-caret focusOwner anchorOwner]
+     {:focusOffset (:focusOffset dom-caret)
+      :anchorOffset (:anchorOffset dom-caret)
       :focusOwner focusOwner
       :anchorOwner anchorOwner})
 
@@ -59,90 +56,78 @@
          (throw (js/Error. (str "Unknown node type: " (:type json-node))))))))
 
 
-;; TODO: Would it be better to user graft for this?
-(defn comp-cursor [data owner]
-  (reify
-    om/IWillMount
-    (will-mount [this]
-                (go (loop []
-                      (let [cursor-cmd (<! (om/get-shared owner :cursor-chan))
-                            cmd-type (:type cursor-cmd)
-                            args (:args cursor-cmd)]
-                        (condp = cmd-type
-                         :inc
-                          (do
-                            (om/transact! data
-                                          (fn [xs] (assoc xs :focusOffset (inc (:focusOffset xs))))))
-                         :dec (println "dec")
-                         :click
-                          (let [{:keys [cursor]} args]
-                            (println "Cursor notified of click" cursor)
-                            (om/update! data cursor))
-                         :render
-                          (let [rng (-> js/document .createRange)
-                                owner (:focusOwner @data)
-                                focusOffset (:focusOffset @data)
-                                node (om/get-node owner)
-                                child (.-firstChild node)]
-                            (.setStart rng child focusOffset)
-                            (set-dom-cursor rng))
-                          (println "Unknown cursor command")))
-                      (recur))))
-    om/IRenderState
-    (render-state [this state]
-                  (println "Cursor dom-node: " data)
-                  (dom/div nil nil))))
 
 (defn keycode->char [keycode]
   (condp = keycode
     32 "\u00a0"
     (.fromCharCode js/String keycode)))
 
-(defn comp-terminal-node [data owner {cursor-cb :cursor-cb}]
+
+(defn caret-action [caret {cmd-type :type
+                           args :args}]
+  (println "CARET ACTION" caret cmd-type)
+  (condp = cmd-type
+    :inc (do
+           (println "Caret notified of inc")
+           (swap! caret (fn [xs]
+                             (println "swap! " xs)
+                             (assoc xs
+                               :focusOffset (inc (:focusOffset xs))
+                               :anchorOffset (inc (:anchorOffset xs)))))
+           (println caret))
+    :dec (println "dec")
+    :click (let [{new-caret :caret} args]
+             (println "new-caret" new-caret)
+             (reset! caret new-caret))
+    :render (let [rng (-> js/document .createRange)
+                  owner (-> @caret :focusOwner)
+                  focusOffset (-> @caret :focusOffset)
+                  node (om/get-node owner)
+                  child (.-firstChild node)
+                  ]
+              (.setStart rng child focusOffset)
+              (set-dom-caret rng))
+    (.log js/console "Unknown caret command")))
+
+
+(defn comp-terminal-node [data owner]
   (reify
     om/IInitState
     (init-state [_]
                 {:keypress-chan (chan)})
     om/IWillMount
     (will-mount [_]
-                (let [keypress-chan (om/get-state owner :keypress-chan)
-                      cursor-chan (om/get-shared owner :cursor-chan)]
+                (let [keypress-chan (om/get-state owner :keypress-chan)]
                   (go (loop []
-                        (let [{:keys [keycode cursor]} (<! keypress-chan)
-                              {:keys [focusOffset]} cursor
+                        (let [{:keys [keycode]} (<! keypress-chan)
+                              caret (om/get-shared owner :caret)
+                              {:keys [focusOffset]} @caret
                               char (keycode->char keycode)
                               node (om/get-node owner)]
-                          (println "Terminal got a keypress!" node char cursor focusOffset)
+                          (println "Terminal got a keypress!" node char caret focusOffset)
                           (om/transact! data :text
                                         (fn [text]
                                           (str (subs text 0 focusOffset) char (subs text focusOffset))))
-                          (cursor-cb {:type :inc})
-                          #_(put! cursor-chan {:type :inc}))
+                          (caret-action caret {:type :inc}))
                         (recur)))))
     om/IRenderState
     (render-state [this state]
                   (let [attrs {:onClick (fn [e]
                                           (let [click-chan (om/get-shared owner :click-chan)
                                                 keypress-chan (om/get-state owner :keypress-chan)]
-                                            #_(println "Click from terminal: " @data (get-dom-cursor))
-                                            (.log js/console (str "Click from terminal: " @data (get-dom-cursor)))
-                                            (put! click-chan {:keypress-chan keypress-chan
-                                                              :cursor (dom-cursor->cursor (get-dom-cursor) owner owner)})))}]
+                                            #_(println "Click from terminal: " @data (get-dom-caret))
+                                            (.log js/console (str "Click from terminal: " @data (get-dom-caret)))
+                                            (caret-action (om/get-shared owner :caret) {:type :click
+                                                                                        :args {:caret (dom-caret->caret (get-dom-caret) owner owner)}})
+                                            (put! click-chan {:keypress-chan keypress-chan})))}]
                     (json-terminal-node->om-node data attrs)))
     om/IDidUpdate
     (did-update [this prev-props prev-state]
-                ;; Update the cursor location
-                (let [node (om/get-node owner)
-                      rng (-> js/document .createRange)
-                      child (.-firstChild node)
-                      cursor-chan (om/get-shared owner :cursor-chan)]
-                  #_(put! cursor-chan {:type :render})
-                  (cursor-cb {:type :render})
-                  #_(.selectNode rng child)
-                  #_(.collapse rng false)
-                  #_(set-dom-cursor rng)))))
+                ;; Update the caret location
+                (let [caret (om/get-shared owner :caret)]
+                  (caret-action caret {:type :render})))))
 
-(defn comp-node [data owner {cursor-cb :cursor-cb}]
+(defn comp-node [data owner]
   (reify
     om/IRenderState
     (render-state [this state]
@@ -150,9 +135,17 @@
                     (do
                       (:type data)   ;; TODO: Need to use the type as the node
                       (apply dom/pre nil
-                             (om/build-all comp-node (:children data) {:opts {:cursor-cb cursor-cb}})))
+                             (om/build-all comp-node (:children data))))
                     (do
-                      (om/build comp-terminal-node data {:opts {:cursor-cb cursor-cb}}))))))
+                      (om/build comp-terminal-node data))))))
+
+;; Keycodes
+(def BACKSPACE 8)
+(def DELETE 46)
+(def LEFTARROW 37)
+(def RIGHTARROW 39)
+(def UPARROW 38)
+(def DOWNARROW 40)
 
 
 
@@ -166,11 +159,7 @@
     (will-mount [_]
                 (let [click-chan (om/get-shared owner :click-chan)]
                   (go (loop []
-                        (let [{:keys [keypress-chan cursor]} (<! click-chan)
-                              cursor-chan (om/get-shared owner :cursor-chan)]
-                          (println "Testing cursor-chan")
-                          (put! cursor-chan {:type :click
-                                             :args {:cursor cursor}})
+                        (let [{:keys [keypress-chan]} (<! click-chan)]
                           (om/set-state! owner :keypress-chan keypress-chan))
                         (recur)))))
     om/IRenderState
@@ -179,41 +168,34 @@
                            (apply dom/div #js {:contentEditable true
                                                :spellCheck false
                                                :onKeyDown (fn [e]
-                                                            #_(println "keydown"))
+                                                            (let [keycode (.-which e)]
+                                                              (println "keydown " keycode)
+                                                              (cond
+                                                               (= BACKSPACE keycode) (do
+                                                                                       (println "Backspace")
+                                                                                       (.preventDefault e))
+                                                               (= DELETE keycode) (do
+                                                                                    (println "Del")
+                                                                                    (.preventDefault e))
+                                                               (#{UPARROW DOWNARRAY RIGHTARROW LEFTARROW} keycode) (do
+                                                                                                                     (println "update caret"))
+                                                               :else nil)))
                                                :onKeyPress (fn [e]
                                                              #_(println "keypress")
                                                              (.preventDefault e)
                                                              (when-let [keypress-chan (:keypress-chan (om/get-state owner))]
-                                                               (put! keypress-chan {:keycode (.. e -which)
-                                                                                    :cursor (:cursor @data)})))}
-                                  (om/build-all comp-node (:dom data) {:opts {:cursor-cb (fn [{cmd-type :type
-                                                                                               args :args}]
-                                                                                           (condp = cmd-type
-                                                                                             :inc (do
-                                                                                                    (om/transact! data :cursor
-                                                                                                                  (fn [xs] (assoc xs :focusOffset (inc (:focusOffset xs))))))
-                                                                                             :dec (println "dec")
-                                                                                             :click (let [{:keys [cursor]} args]
-                                                                                                      (println "Cursor notified of click" cursor)
-                                                                                                      (om/update! data cursor))
-                                                                                             :render (let [rng (-> js/document .createRange)
-                                                                                                           owner (-> data :cursor :focusOwner)
-                                                                                                           focusOffset (-> data :cursor :focusOffset)
-                                                                                                           node (om/get-node owner)
-                                                                                                           child (.-firstChild node)
-                                                                                                           ]
-                                                                                                       (.setStart rng child focusOffset)
-                                                                                                       (set-dom-cursor rng))
-                                                                                             (println "Unknown cursor command")))}}))
-                           (om/build comp-cursor (:cursor data))))))
+                                                               (put! keypress-chan {:keycode (.. e -which)})))}
+                                  (om/build-all comp-node (:dom data)))))))
 
 
-(let [click-chan (chan)
-      cursor-chan (chan)]
+(let [click-chan (chan)]
   (om/root comp-richeditor data4
            {:target (. js/document (getElementById "editor"))
             :shared {:click-chan click-chan   ;; Notifies the richeditor when clicks happen on a terminal node
-                     :cursor-chan cursor-chan ;; This chan is to send notifications to the cursor that something has changed
+                     :caret (atom {:focusOffset 0
+                                   :focusOwner nil
+                                   :anchorOffset 0
+                                   :anchorOwner nil})
                      }}))
 
 
