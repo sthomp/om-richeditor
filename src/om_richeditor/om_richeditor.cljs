@@ -25,11 +25,16 @@
                           :anchorPath []}}))
 
 
-(defn set-dom-caret [range]
-  (let [selection (-> js/window .getSelection)]
-    (.removeAllRanges selection)
-    (.addRange selection range)
-    nil))
+(defn set-dom-caret 
+  ([range] 
+   (let [selection (-> js/window .getSelection)]
+     (.removeAllRanges selection)
+     (.addRange selection range)
+     nil))
+  ([dom-node focus-offset]
+   (let [new-range (.createRange js/document)]
+     (.setStart new-range (.-firstChild dom-node) focus-offset)
+     (set-dom-caret new-range))))
 
 (defn get-dom-caret []
   (let [selection (-> js/window .getSelection)]
@@ -159,7 +164,6 @@
                  (println "path " (conj focus-path :text))
                  (om/transact! root-data (conj focus-path :text)
                                (fn [text]
-                                 (println "got text" text)
                                  (str (subs text 0 focus-offset) char (subs text focus-offset))))
                  (om/transact! root-data [:caret]
                                (fn [caret] 
@@ -204,7 +208,13 @@
                                                             (handle-keypress e data))
                                                :onKeyPress (fn [e]
                                                              (handle-keypress e data))}
-                                  (om/build-all comp-node (:dom data))))))))
+                                  (om/build-all comp-node (:dom data))))))
+    om/IDidUpdate
+    (did-update [this prev-props prev-state]
+                ;; Update the caret location
+                (let [dom-node (path->dom-node owner (-> data :caret :focusPath))
+                      focus-offset (-> data :caret :focusOffset)]
+                  (set-dom-caret dom-node focus-offset)))))
 
 
 (let [click-chan (chan)]
