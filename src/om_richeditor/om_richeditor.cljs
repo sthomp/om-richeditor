@@ -10,15 +10,17 @@
 
 (enable-console-print!)
 
-(def data4 (atom {:dom [{:type "a" :text "Some Terminal Node2" :attrs {:href "http://www.google.com" :rel "nofollow" :target "_blank"}}
-                        {:type "span" :text "Hello world"}
-                        {:type "p" :children [{:type "span" :text "Child1"}
-                                              {:type "span" :text "Child2"}
-                                              {:type "p" :children [{:type "span" :text "GrandChild1"}
-                                                                    {:type "span" :text "GrandChild2"}
-                                                                    {:type "p" :children [{:type "span" :text "GrandChild2"}
-                                                                                          {:type "span" :text "GrandChild3"}]}]}]}
-                        {:type "p" :text "Another line..."}]}))
+(def data4 (atom {:dom [{:tag "a" :text "Some Terminal Node2" :attrs {:href "http://www.google.com" :rel "nofollow" :target "_blank"}}
+                        {:tag "span" :text "Hello world"}
+                        {:tag "p" :children [{:tag "span" :text "Child1"}
+                                              {:tag "span" :text "Child2"}
+                                              {:tag "p" :children [{:tag "span" :text "GrandChild1"}
+                                                                    {:tag "span" :text "GrandChild2"}
+                                                                    {:tag "p" :children [{:tag "span" :text "GrandChild2"}
+                                                                                          {:tag "span" :text "GrandChild3"}]}]}]}
+                        {:tag "p" :text "Another line..."}]
+                  :caret {:path [:dom 1 :children 0]
+                          :focusOffset 0}}))
 
 
 (defn set-dom-caret [range]
@@ -48,12 +50,12 @@
      (let [text (:text json-node)
            attrs (merge (:attrs json-node) additional-attrs)
            js-attrs (clj->js attrs)]
-       (case (:type json-node)
+       (case (:tag json-node)
          "span" (dom/span js-attrs text)
          "em" (dom/em js-attrs text)
          "p" (dom/p js-attrs text)
          "a" (dom/a js-attrs text)
-         (throw (js/Error. (str "Unknown node type: " (:type json-node))))))))
+         (throw (js/Error. (str "Unknown node tag: " (:tag json-node))))))))
 
 
 
@@ -104,11 +106,11 @@
                               {:keys [focusOffset]} @caret
                               char (keycode->char keycode)
                               node (om/get-node owner)]
-                          (println "Terminal got a keypress!" node char caret focusOffset)
-                          (om/transact! data :text
+                          #_(println "Terminal got a keypress!" node char caret focusOffset)
+                          #_(om/transact! data :text
                                         (fn [text]
                                           (str (subs text 0 focusOffset) char (subs text focusOffset))))
-                          (caret-action caret {:type :inc}))
+                          #_(caret-action caret {:type :inc}))
                         (recur)))))
     om/IRenderState
     (render-state [this state]
@@ -135,7 +137,7 @@
     (render-state [this state]
                   (if (contains? data :children)
                     (do
-                      (:type data)   ;; TODO: Need to use the type as the node
+                      (:tag data)   ;; TODO: Need to use the tag as the node
                       (apply dom/pre nil
                              (om/build-all comp-node (:children data))))
                     (do
@@ -164,6 +166,45 @@
                             dom-node)))]
     (traverse-down root-dom path)))
 
+
+(defn handle-keypress [e root-data path caret-focusoffset]
+  (.log js/console e)
+  (condp = (.. e -type)
+    "keydown" (condp = (.. e -which)
+                ;; Block certain keystrokes from propogating to keypress
+                ;; but let regular keystrokes pass through (like pressing a character)
+                BACKSPACE (do
+                            (.. e preventDefault)
+                            (println "backspace"))
+                DELETE (do
+                         (.. e preventDefault)
+                         (println "delete"))
+                UPARROW (do
+                          (.. e preventDefault)
+                          (println "up")) 
+                DOWNARROW (do
+                            (.. e preventDefault)
+                            (println "down"))
+                LEFTARROW (do
+                            (.. e preventDefault)
+                            (println "left"))
+                RIGHTARROW (do
+                             (.. e preventDefault)
+                             (println "right"))
+                nil)
+    "keypress" (let [keycode (.. e -which)
+                     char (keycode->char keycode)]
+                 (.. e preventDefault)
+                 (.log js/console char)
+                 (println "path " (conj path :text))
+                 (om/transact! root-data (conj path :text)
+                               (fn [text]
+                                 (println "got text" text)
+                                 (str (subs text 0 caret-focusoffset) char (subs text caret-focusoffset))))
+                 (println "keypress")) 
+    nil))
+
+
 (defn comp-richeditor [data owner]
   (reify
     om/IInitState
@@ -186,28 +227,20 @@
                         (recur)))))
     om/IRenderState
     (render-state [this state]
-                  (dom/div nil
+                  (let [path [:dom 1]
+                        caret-focusoffset 1]
+                    (om/transact! data [:caret :focusOffset] 
+                                  (fn [x] 1))
+                    (dom/div nil
                            (apply dom/div #js {:contentEditable true
                                                :spellCheck false
                                                :onKeyDown (fn [e]
-                                                            (let [keycode (.-which e)]
-                                                              (println "keydown " keycode)
-                                                              (cond
-                                                               (= BACKSPACE keycode) (do
-                                                                                       (println "Backspace")
-                                                                                       (.preventDefault e))
-                                                               (= DELETE keycode) (do
-                                                                                    (println "Del")
-                                                                                    (.preventDefault e))
-                                                               (#{UPARROW DOWNARRAY RIGHTARROW LEFTARROW} keycode) (do
-                                                                                                                     (println "update caret"))
-                                                               :else nil)))
+                                                            (handle-keypress e data path caret-focusoffset))
                                                :onKeyPress (fn [e]
-                                                             #_(println "keypress")
-                                                             (.preventDefault e)
+                                                             (handle-keypress e data path caret-focusoffset)
                                                              (when-let [keypress-chan (:keypress-chan (om/get-state owner))]
                                                                (put! keypress-chan {:keycode (.. e -which)})))}
-                                  (om/build-all comp-node (:dom data)))))))
+                                  (om/build-all comp-node (:dom data))))))))
 
 
 (let [click-chan (chan)]
@@ -221,33 +254,25 @@
             :tx-listen (fn [tx-data root-cursor]
                          nil )}))
 
-(def test-data (atom [{:name "scott" :tags ["fun" "exciting"]}
-                      {:name "alex" :tags ["wild" "nice"]}]))
 
 
 
-(defn comp-person [data owner]
+
+
+(defn comp-caret [data owner]
   (reify
     om/IRenderState
     (render-state [this state]
-                  (dom/li nil
-                          (dom/div nil (:name data))
-                          (apply dom/ul nil
-                                  (map-indexed #(dom/li nil (str %1 ". " %2)) (:tags data)))))))
+                  (println data)
+                  (dom/table #js {:className "caret-table"}
+                             (dom/tbody nil 
+                                        (dom/tr nil
+                                                (dom/td nil ":path")
+                                                (dom/td nil (str "[" (string/join " " (:path data)) "]")))
+                                        (dom/tr nil 
+                                                (dom/td nil ":focusOffset")
+                                                (dom/td nil (:focusOffset data))))))))
 
-(defn comp-people [data owner]
-  (reify
-    om/IRenderState
-    (render-state [this state]
-                  (dom/div nil
-                           (dom/h1 nil "People")
-                           (apply dom/ul nil
-                                  (map-indexed #(om/build comp-person %2 {:react-key (str "id.")}) data))))))
-
-;; (om/root comp-people test-data
-;;          {:target (. js/document (getElementById "editor"))})
-
-
-;; (do
-;;   (println "------------")
-;;   (dom/render-to-str (om/build comp-keytest data4)))
+(om/root comp-caret data4
+         {:target (. js/document (getElementById "caret"))
+          :path [:caret]})

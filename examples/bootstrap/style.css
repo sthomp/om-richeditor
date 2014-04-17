@@ -1,0 +1,6 @@
+.caret-table {
+  border-collapse:collapse;
+}
+.caret-table, .caret-table td, .caret-table tr{
+  border:1px solid black; 
+}
