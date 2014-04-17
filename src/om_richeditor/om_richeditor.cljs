@@ -120,31 +120,6 @@
     (traverse-down root-dom path)))
 
 
-(defn caret-action [root-data
-                    {cmd-type :type args :args}]
-  (println "CARET ACTION" caret cmd-type)
-  (condp = cmd-type
-    :inc (do
-           (println "Caret notified of inc")
-           (swap! caret (fn [xs]
-                             (println "swap! " xs)
-                             (assoc xs
-                               :focusOffset (inc (:focusOffset xs))
-                               :anchorOffset (inc (:anchorOffset xs)))))
-           (println caret))
-    :dec (println "dec")
-    :click (let [{new-caret :caret} args]
-             (println "new-caret" new-caret)
-             (reset! caret new-caret))
-    :render (let [rng (-> js/document .createRange)
-                  owner (-> @caret :focusOwner)
-                  focusOffset (-> @caret :focusOffset)
-                  node (om/get-node owner)
-                  child (.-firstChild node)
-                  ]
-              (.setStart rng child focusOffset)
-              (set-dom-caret rng))
-    (.log js/console "Unknown caret command")))
 
 
 (defn handle-keypress [e root-data]
