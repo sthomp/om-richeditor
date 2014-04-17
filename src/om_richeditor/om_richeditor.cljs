@@ -119,11 +119,13 @@
                                             (.log js/console (str "Click from terminal: " @data (get-dom-caret)))
                                             (caret-action (om/get-shared owner :caret) {:type :click
                                                                                         :args {:caret (dom-caret->caret (get-dom-caret) owner owner)}})
-                                            (put! click-chan {:keypress-chan keypress-chan})))}]
+                                            (put! click-chan {:keypress-chan keypress-chan
+                                                              :path (om.core/path data)})))}]
                     (json-terminal-node->om-node data attrs)))
     om/IDidUpdate
     (did-update [this prev-props prev-state]
                 ;; Update the caret location
+                (println "RE-RENDER: " owner (om/path data))
                 (let [caret (om/get-shared owner :caret)]
                   (caret-action caret {:type :render})))))
 
@@ -147,7 +149,20 @@
 (def UPARROW 38)
 (def DOWNARROW 40)
 
+(drop-while #(not (number? %)) [:a :b 1 2 :keyword 3])
 
+
+(defn path->dom-node [root-owner path]
+  (let [root-dom (-> root-owner
+                     om/get-node
+                     .-firstChild)
+        traverse-down (fn traverse-down [dom-node path]
+                        (let [path-head (drop-while #(not (number? %)) path)]
+                          (if-let [child-idx (first path-head)]
+                            (let [child-at-path (-> dom-node .-children (aget child-idx))]
+                              (traverse-down child-at-path (drop 1 path-head)))
+                            dom-node)))]
+    (traverse-down root-dom path)))
 
 (defn comp-richeditor [data owner]
   (reify
@@ -159,8 +174,15 @@
     (will-mount [_]
                 (let [click-chan (om/get-shared owner :click-chan)]
                   (go (loop []
-                        (let [{:keys [keypress-chan]} (<! click-chan)]
-                          (om/set-state! owner :keypress-chan keypress-chan))
+                        (let [{:keys [keypress-chan path]} (<! click-chan)]
+                          (println "CLICK" path)
+                          (.log js/console (path->dom-node owner path))
+                          #_(om/update! data [:dom 2 :children 1] (get-in @data [:dom 2 :children 1]))
+                          #_(om/transact! data [:dom 2 :children 1 :text]
+                                        (fn [x]
+                                          (println x)
+                                          "blah"))
+                          #_(om/set-state! owner :keypress-chan keypress-chan))
                         (recur)))))
     om/IRenderState
     (render-state [this state]
@@ -195,8 +217,35 @@
                      :caret (atom {:focusOffset 0
                                    :focusOwner nil
                                    :anchorOffset 0
-                                   :anchorOwner nil})
-                     }}))
+                                   :anchorOwner nil})}
+            :tx-listen (fn [tx-data root-cursor]
+                         nil )}))
+
+(def test-data (atom [{:name "scott" :tags ["fun" "exciting"]}
+                      {:name "alex" :tags ["wild" "nice"]}]))
+
+
+
+(defn comp-person [data owner]
+  (reify
+    om/IRenderState
+    (render-state [this state]
+                  (dom/li nil
+                          (dom/div nil (:name data))
+                          (apply dom/ul nil
+                                  (map-indexed #(dom/li nil (str %1 ". " %2)) (:tags data)))))))
+
+(defn comp-people [data owner]
+  (reify
+    om/IRenderState
+    (render-state [this state]
+                  (dom/div nil
+                           (dom/h1 nil "People")
+                           (apply dom/ul nil
+                                  (map-indexed #(om/build comp-person %2 {:react-key (str "id.")}) data))))))
+
+;; (om/root comp-people test-data
+;;          {:target (. js/document (getElementById "editor"))})
 
 
 ;; (do
