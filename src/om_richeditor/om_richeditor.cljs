@@ -19,10 +19,10 @@
                                                                     {:tag "p" :children [{:tag "span" :text "GrandChild2"}
                                                                                           {:tag "span" :text "GrandChild3"}]}]}]}
                         {:tag "p" :text "Another line..."}]
-                  :caret {:focusPath []
-                          :focusOffset 0
-                          :anchorOffset 0
-                          :anchorPath []}}))
+                  :caret {:focus-path []
+                          :focus-offset 0
+                          :anchor-offset 0
+                          :anchor-path []}}))
 
 
 (defn set-dom-caret 
@@ -40,8 +40,8 @@
   (let [selection (-> js/window .getSelection)]
     {:focusNode (.-focusNode selection)
      :anchorNode (.-anchorNode selection)
-     :focusOffset (.-focusOffset selection)
-     :anchorOffset (.-anchorOffset selection)}))
+     :focus-offset (.-focusOffset selection)
+     :anchor-offset (.-anchorOffset selection)}))
 
 (defn json-terminal-node->om-node
   "additional-attrs is an *optional* map of additional attributes."
@@ -125,7 +125,22 @@
     (traverse-down root-dom path)))
 
 
-
+(defn caret-action [action root-data]
+  (condp = action
+    "inc" (om/transact! root-data [:caret]
+                (fn [caret] 
+                  (let [{:keys [focus-offset anchor-offset]} caret]
+                    (assoc caret
+                      :focus-offset (inc focus-offset)
+                      :anchor-offset (inc anchor-offset)))))
+    "dec" (om/transact! root-data [:caret]
+                (fn [caret] 
+                  (let [{:keys [focus-offset anchor-offset]} caret]
+                    (assoc caret
+                      :focus-offset (dec focus-offset)
+                      :anchor-offset (dec anchor-offset)))))
+    (throw (js/Error. (str "Unknown caret-action: " action))))
+  )
 
 (defn handle-keypress [e root-data]
   (.log js/console e)
@@ -147,29 +162,24 @@
                             (println "down"))
                 LEFTARROW (do
                             (.. e preventDefault)
+                            (caret-action "dec" root-data)
                             (println "left"))
                 RIGHTARROW (do
                              (.. e preventDefault)
+                             (caret-action "inc" root-data)
                              (println "right"))
                 nil)
     "keypress" (let [keycode (.. e -which)
                      char (keycode->char keycode)
                      caret (-> @root-data :caret)
-                     focus-path (:focusPath caret)
-                     focus-offset (:focusOffset caret)
-                     anchor-offset (:anchorOffset caret)]
+                     focus-path (:focus-path caret)
+                     focus-offset (:focus-offset caret)
+                     anchor-offset (:anchor-offset caret)]
                  (.. e preventDefault)
-                 (.log js/console char)
-                 
-                 (println "path " (conj focus-path :text))
                  (om/transact! root-data (conj focus-path :text)
                                (fn [text]
                                  (str (subs text 0 focus-offset) char (subs text focus-offset))))
-                 (om/transact! root-data [:caret]
-                               (fn [caret] 
-                                 (assoc caret
-                                   :focusOffset (inc focus-offset)
-                                   :anchorOffset (inc anchor-offset))))
+                 (caret-action "inc" root-data)
                  (println "keypress")) 
     nil))
 
@@ -186,10 +196,10 @@
                   (go (loop []
                         (let [{:keys [path]} (<! click-chan)
                               dom-caret (get-dom-caret)
-                              new-caret {:focusOffset (:focusOffset dom-caret)
-                                         :anchorOffset (:anchorOffset dom-caret)
-                                         :focusPath path
-                                         :anchorPath path}]
+                              new-caret {:focus-offset (:focus-offset dom-caret)
+                                         :anchor-offset (:anchor-offset dom-caret)
+                                         :focus-path path
+                                         :anchor-path path}]
                           
                           
                           (.log js/console (str "About to update " new-caret))
@@ -199,21 +209,19 @@
                         (recur)))))
     om/IRenderState
     (render-state [this state]
-                  (let [path [:dom 1]
-                        caret-focusoffset 1]
-                    (dom/div nil
+                  (dom/div nil
                            (apply dom/div #js {:contentEditable true
                                                :spellCheck false
                                                :onKeyDown (fn [e]
                                                             (handle-keypress e data))
                                                :onKeyPress (fn [e]
                                                              (handle-keypress e data))}
-                                  (om/build-all comp-node (:dom data))))))
+                                  (om/build-all comp-node (:dom data)))))
     om/IDidUpdate
     (did-update [this prev-props prev-state]
                 ;; Update the caret location
-                (let [dom-node (path->dom-node owner (-> data :caret :focusPath))
-                      focus-offset (-> data :caret :focusOffset)]
+                (let [dom-node (path->dom-node owner (-> data :caret :focus-path))
+                      focus-offset (-> data :caret :focus-offset)]
                   (set-dom-caret dom-node focus-offset)))))
 
 
@@ -238,17 +246,17 @@
                   (dom/table #js {:className "caret-table"}
                              (dom/tbody nil 
                                         (dom/tr nil
-                                                (dom/td nil ":focusPath")
-                                                (dom/td nil (str "[" (string/join " " (:focusPath data)) "]")))
+                                                (dom/td nil ":focus-path")
+                                                (dom/td nil (str "[" (string/join " " (:focus-path data)) "]")))
                                         (dom/tr nil 
-                                                (dom/td nil ":focusOffset")
-                                                (dom/td nil (:focusOffset data)))
+                                                (dom/td nil ":focus-offset")
+                                                (dom/td nil (:focus-offset data)))
                                         (dom/tr nil 
-                                                (dom/td nil ":anchorPath")
-                                                (dom/td nil (str "[" (string/join " " (:anchorPath data)) "]")))
+                                                (dom/td nil ":anchor-path")
+                                                (dom/td nil (str "[" (string/join " " (:anchor-path data)) "]")))
                                         (dom/tr nil 
-                                                (dom/td nil ":anchorOffset")
-                                                (dom/td nil (:anchorOffset data))))))))
+                                                (dom/td nil ":anchor-offset")
+                                                (dom/td nil (:anchor-offset data))))))))
 
 (om/root comp-caret data4
          {:target (. js/document (getElementById "caret"))
