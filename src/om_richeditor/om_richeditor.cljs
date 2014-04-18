@@ -13,11 +13,12 @@
 (def data4 (atom {:dom [{:tag "a" :text "Some Terminal Node2" :attrs {:href "http://www.google.com" :rel "nofollow" :target "_blank"}}
                         {:tag "span" :text "Hello world"}
                         {:tag "p" :children [{:tag "span" :text "Child1"}
-                                              {:tag "span" :text "Child2"}
-                                              {:tag "p" :children [{:tag "span" :text "GrandChild1"}
-                                                                    {:tag "span" :text "GrandChild2"}
-                                                                    {:tag "p" :children [{:tag "span" :text "GrandChild2"}
-                                                                                          {:tag "span" :text "GrandChild3"}]}]}]}
+                                             {:tag "span" :text "Child2"}
+                                             {:tag "p" :children [{:tag "span" :text "GrandChild1"}
+                                                                  {:tag "span" :text "GrandChild2"}
+                                                                  {:tag "p" :text "GrandChild3"}
+                                                                  {:tag "p" :children [{:tag "span" :text "GrandChild2"}
+                                                                                       {:tag "span" :text "GrandChild3"}]}]}]}
                         {:tag "p" :text "Another line..."}]
                   :caret {:focus-path []
                           :focus-offset 0
@@ -25,8 +26,8 @@
                           :anchor-path []}}))
 
 
-(defn set-dom-caret 
-  ([range] 
+(defn set-dom-caret
+  ([range]
    (let [selection (-> js/window .getSelection)]
      (.removeAllRanges selection)
      (.addRange selection range)
@@ -109,8 +110,6 @@
 (def UPARROW 38)
 (def DOWNARROW 40)
 
-(drop-while #(not (number? %)) [:a :b 1 2 :keyword 3])
-
 
 (defn path->dom-node [root-owner path]
   (let [root-dom (-> root-owner
@@ -124,21 +123,37 @@
                             dom-node)))]
     (traverse-down root-dom path)))
 
+(defn up [current-path current-focus-offset]
+  (drop-last 2 current-path)
+  [new-path new-focus-offset])
+(def case1-path [:dom 2 :children 2 :children 0])
+(def case1-offset 3)    ;; Expect: [:dom 2 :children 0] and 3
+(case case2-offset 10)  ;; Expect: [:dom 2 :children 1] and 4
+(def y (drop-last 2 x))
+(last y)
+y
 
 (defn caret-action [action root-data]
   (condp = action
-    "inc" (om/transact! root-data [:caret]
-                (fn [caret] 
-                  (let [{:keys [focus-offset anchor-offset]} caret]
+    :caret-inc (om/transact! root-data [:caret]
+                (fn [caret]
+                  (let [{:keys [focus-offset anchor-offset]} caret
+                        new-focus-offset (inc focus-offset)]
                     (assoc caret
-                      :focus-offset (inc focus-offset)
-                      :anchor-offset (inc anchor-offset)))))
-    "dec" (om/transact! root-data [:caret]
-                (fn [caret] 
-                  (let [{:keys [focus-offset anchor-offset]} caret]
+                      :focus-offset new-focus-offset
+                      :anchor-offset new-focus-offset))))
+    :caret-dec (om/transact! root-data [:caret]
+                (fn [caret]
+                  (let [{:keys [focus-offset anchor-offset]} caret
+                        new-focus-offset (dec focus-offset)]
                     (assoc caret
-                      :focus-offset (dec focus-offset)
-                      :anchor-offset (dec anchor-offset)))))
+                      :focus-offset new-focus-offset
+                      :anchor-offset new-focus-offset))))
+    :caret-up (om/transact! root-data [:caret]
+                            (fn [caret]
+                              (let [{:keys [focus-path anchor-path]} caret]
+                                (drop-last 2 focus-path)
+                                )))
     (throw (js/Error. (str "Unknown caret-action: " action))))
   )
 
@@ -156,17 +171,17 @@
                          (println "delete"))
                 UPARROW (do
                           (.. e preventDefault)
-                          (println "up")) 
+                          (println "up"))
                 DOWNARROW (do
                             (.. e preventDefault)
                             (println "down"))
                 LEFTARROW (do
                             (.. e preventDefault)
-                            (caret-action "dec" root-data)
+                            (caret-action :caret-dec root-data)
                             (println "left"))
                 RIGHTARROW (do
                              (.. e preventDefault)
-                             (caret-action "inc" root-data)
+                             (caret-action :caret-inc root-data)
                              (println "right"))
                 nil)
     "keypress" (let [keycode (.. e -which)
@@ -179,8 +194,8 @@
                  (om/transact! root-data (conj focus-path :text)
                                (fn [text]
                                  (str (subs text 0 focus-offset) char (subs text focus-offset))))
-                 (caret-action "inc" root-data)
-                 (println "keypress")) 
+                 (caret-action :caret-inc root-data)
+                 (println "keypress"))
     nil))
 
 
@@ -200,8 +215,8 @@
                                          :anchor-offset (:anchor-offset dom-caret)
                                          :focus-path path
                                          :anchor-path path}]
-                          
-                          
+
+
                           (.log js/console (str "About to update " new-caret))
                           (om/update! data :caret new-caret)
                           (println "CLICK" path)
@@ -244,17 +259,17 @@
     (render-state [this state]
                   (println "comp-caret " data)
                   (dom/table #js {:className "caret-table"}
-                             (dom/tbody nil 
+                             (dom/tbody nil
                                         (dom/tr nil
                                                 (dom/td nil ":focus-path")
                                                 (dom/td nil (str "[" (string/join " " (:focus-path data)) "]")))
-                                        (dom/tr nil 
+                                        (dom/tr nil
                                                 (dom/td nil ":focus-offset")
                                                 (dom/td nil (:focus-offset data)))
-                                        (dom/tr nil 
+                                        (dom/tr nil
                                                 (dom/td nil ":anchor-path")
                                                 (dom/td nil (str "[" (string/join " " (:anchor-path data)) "]")))
-                                        (dom/tr nil 
+                                        (dom/tr nil
                                                 (dom/td nil ":anchor-offset")
                                                 (dom/td nil (:anchor-offset data))))))))
 
