@@ -44,6 +44,9 @@
      :focus-offset (.-focusOffset selection)
      :anchor-offset (.-anchorOffset selection)}))
 
+
+
+
 (defn json-terminal-node->om-node
   "additional-attrs is an *optional* map of additional attributes."
   ([json-node]
@@ -82,7 +85,7 @@
     (render-state [this state]
                   (let [attrs {:onClick (fn [e]
                                           (let [click-chan (om/get-shared owner :click-chan)]
-                                            (.log js/console (str "Click from terminal: " @data (get-dom-caret)))
+                                            (.log js/console (str "Click from terminal: " @data ))
                                             (put! click-chan {:path (om.core/path data)})))}]
                     (json-terminal-node->om-node data attrs)))
     om/IDidUpdate
@@ -131,57 +134,36 @@
 (case case2-offset 10)  ;; Expect: [:dom 2 :children 1] and 4
 (def y (drop-last 2 x))
 (last y)
-y
 
-(defn caret-action [action root-data]
-  (condp = action
-    :caret-inc (om/transact! root-data [:caret]
-                (fn [caret]
-                  (let [{:keys [focus-offset anchor-offset]} caret
-                        new-focus-offset (inc focus-offset)]
-                    (assoc caret
-                      :focus-offset new-focus-offset
-                      :anchor-offset new-focus-offset))))
-    :caret-dec (om/transact! root-data [:caret]
-                (fn [caret]
-                  (let [{:keys [focus-offset anchor-offset]} caret
-                        new-focus-offset (dec focus-offset)]
-                    (assoc caret
-                      :focus-offset new-focus-offset
-                      :anchor-offset new-focus-offset))))
-    :caret-up (om/transact! root-data [:caret]
-                            (fn [caret]
-                              (let [{:keys [focus-path anchor-path]} caret]
-                                (drop-last 2 focus-path)
-                                )))
-    (throw (js/Error. (str "Unknown caret-action: " action))))
-  )
+
+(defn probe-for-caret []
+  (let [elem (.. js/window getSelection -focusNode)]
+    (.. elem -parentNode click)))
 
 (defn handle-keypress [e root-data]
-  (.log js/console e)
   (condp = (.. e -type)
     "keydown" (condp = (.. e -which)
-                ;; Block certain keystrokes from propogating to keypress
-                ;; but let regular keystrokes pass through (like pressing a character)
                 BACKSPACE (do
                             (.. e preventDefault)
                             (println "backspace"))
                 DELETE (do
                          (.. e preventDefault)
                          (println "delete"))
+                nil)
+    "keyup" (condp = (.. e -which)
+                ;; Block certain keystrokes from propogating to keypress
+                ;; but let regular keystrokes pass through (like pressing a character)
                 UPARROW (do
-                          (.. e preventDefault)
+                          (probe-for-caret)
                           (println "up"))
                 DOWNARROW (do
-                            (.. e preventDefault)
+                            (probe-for-caret)
                             (println "down"))
                 LEFTARROW (do
-                            (.. e preventDefault)
-                            (caret-action :caret-dec root-data)
+                            (probe-for-caret)
                             (println "left"))
                 RIGHTARROW (do
-                             (.. e preventDefault)
-                             (caret-action :caret-inc root-data)
+                             (probe-for-caret)
                              (println "right"))
                 nil)
     "keypress" (let [keycode (.. e -which)
@@ -194,7 +176,6 @@ y
                  (om/transact! root-data (conj focus-path :text)
                                (fn [text]
                                  (str (subs text 0 focus-offset) char (subs text focus-offset))))
-                 (caret-action :caret-inc root-data)
                  (println "keypress"))
     nil))
 
@@ -203,7 +184,7 @@ y
   (reify
     om/IInitState
     (init-state [_]
-                )
+                {:dom-caret nil})
     om/IWillMount
     (will-mount [_]
                 (let [click-chan (om/get-shared owner :click-chan)]
@@ -215,19 +196,15 @@ y
                                          :anchor-offset (:anchor-offset dom-caret)
                                          :focus-path path
                                          :anchor-path path}]
-
-
-                          (.log js/console (str "About to update " new-caret))
-                          (om/update! data :caret new-caret)
                           (println "CLICK" path)
-                          (.log js/console (path->dom-node owner path)))
+                          (om/update! data :caret new-caret))
                         (recur)))))
     om/IRenderState
     (render-state [this state]
                   (dom/div nil
                            (apply dom/div #js {:contentEditable true
                                                :spellCheck false
-                                               :onKeyDown (fn [e]
+                                               :onKeyUp (fn [e]
                                                             (handle-keypress e data))
                                                :onKeyPress (fn [e]
                                                              (handle-keypress e data))}
@@ -235,7 +212,8 @@ y
     om/IDidUpdate
     (did-update [this prev-props prev-state]
                 ;; Update the caret location
-                (let [dom-node (path->dom-node owner (-> data :caret :focus-path))
+                (println "Richeditor Rerender")
+                #_(let [dom-node (path->dom-node owner (-> data :caret :focus-path))
                       focus-offset (-> data :caret :focus-offset)]
                   (set-dom-caret dom-node focus-offset)))))
 
@@ -257,7 +235,6 @@ y
   (reify
     om/IRenderState
     (render-state [this state]
-                  (println "comp-caret " data)
                   (dom/table #js {:className "caret-table"}
                              (dom/tbody nil
                                         (dom/tr nil
