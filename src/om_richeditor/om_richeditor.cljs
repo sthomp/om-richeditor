@@ -85,7 +85,7 @@
     (render-state [this state]
                   (let [attrs {:onClick (fn [e]
                                           (let [click-chan (om/get-shared owner :click-chan)]
-                                            (.log js/console (str "Click from terminal: " @data ))
+                                            (.log js/console (str "Click from terminal: "))
                                             (put! click-chan {:path (om.core/path data)})))}]
                     (json-terminal-node->om-node data attrs)))
     om/IDidUpdate
@@ -140,6 +140,23 @@
   (let [elem (.. js/window getSelection -focusNode)]
     (.. elem -parentNode click)))
 
+(defn caret-action [action root-data]
+  (condp = action
+    :caret-inc (om/transact! root-data [:caret]
+                             (fn [caret]
+                               (let [{:keys [focus-offset anchor-offset]} caret]
+                                 (assoc caret
+                                   :focus-offset (inc focus-offset)
+                                   :anchor-offset (inc anchor-offset)))))
+    :caret-dec (om/transact! root-data [:caret]
+                             (fn [caret]
+                               (let [{:keys [focus-offset anchor-offset]} caret]
+                                 (assoc caret
+                                   :focus-offset (dec focus-offset)
+                                   :anchor-offset (dec anchor-offset)))))
+    (throw (js/Error. (str "Unknown caret-action: " action)))))
+
+
 (defn handle-keypress [e root-data]
   (condp = (.. e -type)
     "keydown" (condp = (.. e -which)
@@ -176,6 +193,7 @@
                  (om/transact! root-data (conj focus-path :text)
                                (fn [text]
                                  (str (subs text 0 focus-offset) char (subs text focus-offset))))
+                 (caret-action :caret-inc root-data)
                  (println "keypress"))
     nil))
 
@@ -196,7 +214,7 @@
                                          :anchor-offset (:anchor-offset dom-caret)
                                          :focus-path path
                                          :anchor-path path}]
-                          (println "CLICK" path)
+                          (println "CLICK" dom-caret)
                           (om/update! data :caret new-caret))
                         (recur)))))
     om/IRenderState
@@ -213,7 +231,7 @@
     (did-update [this prev-props prev-state]
                 ;; Update the caret location
                 (println "Richeditor Rerender")
-                #_(let [dom-node (path->dom-node owner (-> data :caret :focus-path))
+                (let [dom-node (path->dom-node owner (-> data :caret :focus-path))
                       focus-offset (-> data :caret :focus-offset)]
                   (set-dom-caret dom-node focus-offset)))))
 
