@@ -67,11 +67,10 @@
 (defn keycode->char [keycode]
   (condp = keycode
     32 "\u00a0"
-    (.fromCharCode js/String keycode)))
-
-
-
-
+    (let [new-char (char keycode)]
+      (if (string/blank? new-char)
+        nil
+        new-char))))
 
 (defn comp-terminal-node [data owner]
   (reify
@@ -91,8 +90,7 @@
                     (json-terminal-node->om-node data attrs)))
     om/IDidUpdate
     (did-update [this prev-props prev-state]
-                ;; Update the caret location
-                (println "RE-RENDER: " owner (om/path data)))))
+                )))
 
 (defn comp-node [data owner]
   (reify
@@ -142,6 +140,16 @@
   (let [elem (.. js/window getSelection -focusNode)]
     (.. elem -parentNode click)))
 
+(defn move-caret-offset [n root-data]
+  "Move the caret forward/back by n characters"
+  (om/transact! root-data [:caret]
+                (fn [caret]
+                  (let [{:keys [focus-offset anchor-offset]} caret
+                        new-offset (+ focus-offset n)]
+                    (assoc caret
+                      :focus-offset new-offset
+                      :anchor-offset new-offset)))))
+
 (defn caret-action [action root-data]
   "TODO: Change this so that it automatically increments/decrements by the difference in length of the text string"
   (condp = action
@@ -159,18 +167,38 @@
                                    :anchor-offset (dec anchor-offset)))))
     (throw (js/Error. (str "Unknown caret-action: " action)))))
 
+(defn string-length-diff [str1 str2]
+  (- (count str2) (count str1)))
+
+(defn get-text-value [root-data path]
+  (get-in @root-data (conj path :text)))
 
 (defn handle-keypress [e root-data]
-  (condp = (.. e -type)
-    "keydown" (condp = (.. e -which)
-                BACKSPACE (do
-                            (.. e preventDefault)
-                            (println "backspace"))
-                DELETE (do
-                         (.. e preventDefault)
-                         (println "delete"))
-                nil)
-    "keyup" (condp = (.. e -which)
+  (let [caret (-> @root-data :caret)
+        {:keys [focus-path focus-offset anchor-offset]} caret]
+    (condp = (.. e -type)
+      "keydown" (condp = (.. e -which)
+                  ;; TODO: Delete the node from the data model if its length is 0
+                  BACKSPACE (do
+                              (.. e preventDefault)
+                              (let [current-value (get-text-value root-data focus-path)
+                                    new-value (str (subs current-value 0 (dec focus-offset)) (subs current-value focus-offset))
+                                    char-diff (string-length-diff current-value new-value)]
+                                (om/transact! root-data (conj focus-path :text)
+                                              (fn [text]
+                                                new-value))
+                                (move-caret-offset char-diff root-data)))
+                  DELETE (do
+                           (.. e preventDefault)
+                           (let [current-value (get-text-value root-data focus-path)
+                                 new-value (str (subs current-value 0 focus-offset) (subs current-value (inc focus-offset)))
+                                 char-diff (string-length-diff current-value new-value)]
+                             (om/transact! root-data (conj focus-path :text)
+                                           (fn [text]
+                                             new-value)))
+                           (println "delete"))
+                  nil)
+      "keyup" (condp = (.. e -which)
                 ;; Block certain keystrokes from propogating to keypress
                 ;; but let regular keystrokes pass through (like pressing a character)
                 UPARROW (do
@@ -186,26 +214,27 @@
                              (probe-for-caret)
                              (println "right"))
                 nil)
-    "keypress" (let [keycode (.. e -which)
-                     char (keycode->char keycode)
-                     caret (-> @root-data :caret)
-                     focus-path (:focus-path caret)
-                     focus-offset (:focus-offset caret)
-                     anchor-offset (:anchor-offset caret)]
-                 (.. e preventDefault)
-                 (om/transact! root-data (conj focus-path :text)
-                               (fn [text]
-                                 (str (subs text 0 focus-offset) char (subs text focus-offset))))
-                 (caret-action :caret-inc root-data)
-                 (println "keypress"))
-    nil))
+      "keypress" (let [keycode (.. e -which)
+                       new-char (keycode->char keycode)]
+                   (.. e preventDefault)
+                   (let [current-value (get-text-value root-data focus-path)
+                         new-value (str (subs current-value 0 focus-offset) new-char (subs current-value focus-offset))
+                         char-diff (string-length-diff current-value new-value)]
+                     (println "|" (count (str "a" "" "b")) "|")
+                     (om/transact! root-data (conj focus-path :text)
+                                   (fn [text]
+                                     new-value))
+                     (println "Move caret by " char-diff " chars")
+                     (move-caret-offset char-diff root-data))
+                   (println "keypress"))
+      nil)))
 
 
 (defn comp-richeditor [data owner]
   (reify
     om/IInitState
     (init-state [_]
-                {:dom-caret nil})
+                )
     om/IWillMount
     (will-mount [_]
                 (let [click-chan (om/get-shared owner :click-chan)]
@@ -231,6 +260,8 @@
                   (dom/div nil
                            (apply dom/div #js {:contentEditable true
                                                :spellCheck false
+                                               :onKeyDown (fn [e]
+                                                            (handle-keypress e data))
                                                :onKeyUp (fn [e]
                                                             (handle-keypress e data))
                                                :onKeyPress (fn [e]
@@ -252,11 +283,12 @@
             :shared {:click-chan click-chan   ;; Notifies the richeditor when clicks happen on a terminal node
                      }
             :tx-listen (fn [tx-data root-cursor]
-                         nil )}))
+                         (println "tx-listen")
+                         nil)}))
 
 
 
-
+;; Component to view the caret
 
 
 (defn comp-caret [data owner]
