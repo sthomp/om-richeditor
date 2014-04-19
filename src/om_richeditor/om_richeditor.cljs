@@ -86,7 +86,8 @@
                   (let [attrs {:onClick (fn [e]
                                           (let [click-chan (om/get-shared owner :click-chan)]
                                             (.log js/console (str "Click from terminal: "))
-                                            (put! click-chan {:path (om.core/path data)})))}]
+                                            (put! click-chan {:path (om.core/path data)
+                                                              :current-target (.. e -currentTarget)})))}]
                     (json-terminal-node->om-node data attrs)))
     om/IDidUpdate
     (did-update [this prev-props prev-state]
@@ -137,10 +138,12 @@
 
 
 (defn probe-for-caret []
+  "Forces a click on the element where the caret is"
   (let [elem (.. js/window getSelection -focusNode)]
     (.. elem -parentNode click)))
 
 (defn caret-action [action root-data]
+  "TODO: Change this so that it automatically increments/decrements by the difference in length of the text string"
   (condp = action
     :caret-inc (om/transact! root-data [:caret]
                              (fn [caret]
@@ -208,13 +211,19 @@
                 (let [click-chan (om/get-shared owner :click-chan)]
                   ;; Listen for clicks on terminal nodes so we can reset the caret
                   (go (loop []
-                        (let [{:keys [path]} (<! click-chan)
+                        (let [{:keys [path current-target]} (<! click-chan)
                               dom-caret (get-dom-caret)
-                              new-caret {:focus-offset (:focus-offset dom-caret)
-                                         :anchor-offset (:anchor-offset dom-caret)
-                                         :focus-path path
-                                         :anchor-path path}]
-                          (println "CLICK" dom-caret)
+                              dom-node-caret (.. (:focusNode dom-caret) -parentNode)
+                              new-caret (if (identical? dom-node-caret current-target)
+                                          {:focus-offset (:focus-offset dom-caret)
+                                           :anchor-offset (:anchor-offset dom-caret)
+                                           :focus-path path
+                                           :anchor-path path}
+                                          {:focus-offset 0
+                                           :anchor-offset 0
+                                           :focus-path path
+                                           :anchor-path path})]
+                          (println "CLICK" (.. (:focusNode dom-caret) -parentNode) " TO " current-target)
                           (om/update! data :caret new-caret))
                         (recur)))))
     om/IRenderState
@@ -231,7 +240,8 @@
     (did-update [this prev-props prev-state]
                 ;; Update the caret location
                 (println "Richeditor Rerender")
-                (let [dom-node (path->dom-node owner (-> data :caret :focus-path))
+                (let [focus-path (-> data :caret :focus-path)
+                      dom-node (path->dom-node owner focus-path)
                       focus-offset (-> data :caret :focus-offset)]
                   (set-dom-caret dom-node focus-offset)))))
 
