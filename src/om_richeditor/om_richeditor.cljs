@@ -83,6 +83,8 @@
     om/IRenderState
     (render-state [this state]
                   (let [attrs {:onClick (fn [e]
+                                          (.. e preventDefault)
+                                          (.. e stopPropagation)   ;; prevent parent nodes from receiving the click event
                                           (let [click-chan (om/get-shared owner :click-chan)]
                                             (.log js/console (str "Click from terminal: "))
                                             (put! click-chan {:path (om.core/path data)
@@ -124,16 +126,6 @@
                               (traverse-down child-at-path (drop 1 path-head)))
                             dom-node)))]
     (traverse-down root-dom path)))
-
-(defn up [current-path current-focus-offset]
-  (drop-last 2 current-path)
-  [new-path new-focus-offset])
-(def case1-path [:dom 2 :children 2 :children 0])
-(def case1-offset 3)    ;; Expect: [:dom 2 :children 0] and 3
-(case case2-offset 10)  ;; Expect: [:dom 2 :children 1] and 4
-(def y (drop-last 2 x))
-(last y)
-
 
 (defn probe-for-caret []
   "Forces a click on the element where the caret is"
@@ -260,6 +252,9 @@
                   (dom/div nil
                            (apply dom/div #js {:contentEditable true
                                                :spellCheck false
+                                               :onClick (fn [e]
+                                                          (println "Richeditor click")
+                                                          (probe-for-caret))
                                                :onKeyDown (fn [e]
                                                             (handle-keypress e data))
                                                :onKeyUp (fn [e]
@@ -270,7 +265,6 @@
     om/IDidUpdate
     (did-update [this prev-props prev-state]
                 ;; Update the caret location
-                (println "Richeditor Rerender")
                 (let [focus-path (-> data :caret :focus-path)
                       dom-node (path->dom-node owner focus-path)
                       focus-offset (-> data :caret :focus-offset)]
