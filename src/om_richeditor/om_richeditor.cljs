@@ -72,29 +72,32 @@
         nil
         new-char))))
 
-(defn comp-terminal-node [data owner]
+(defn comp-terminal-node [data owner {:keys [readonly] :as opts}]
   (reify
     om/IInitState
     (init-state [_]
-                )
+                {:attrs (if readonly
+                          {}
+                          {:onClick (fn [e]
+                                      (.. e preventDefault)
+                                      (.. e stopPropagation)   ;; prevent parent nodes from receiving the click event
+                                      (if-let [click-chan (om/get-shared owner :click-chan)]
+                                        (do
+                                          (put! click-chan {:path (om.core/path data)
+                                                          :current-target (.. e -currentTarget)}))
+                                        (throw (js/Error. (str "You must create a :click-chan in shared state")))))})})
     om/IWillMount
     (will-mount [_]
                 )
     om/IRenderState
     (render-state [this state]
-                  (let [attrs {:onClick (fn [e]
-                                          (.. e preventDefault)
-                                          (.. e stopPropagation)   ;; prevent parent nodes from receiving the click event
-                                          (let [click-chan (om/get-shared owner :click-chan)]
-                                            (.log js/console (str "Click from terminal: "))
-                                            (put! click-chan {:path (om.core/path data)
-                                                              :current-target (.. e -currentTarget)})))}]
+                  (let [{:keys [attrs]} (om/get-state owner)]
                     (json-terminal-node->om-node data attrs)))
     om/IDidUpdate
     (did-update [this prev-props prev-state]
                 )))
 
-(defn comp-node [data owner]
+(defn comp-node [data owner {:keys [readonly] :as opts}]
   (reify
     om/IRenderState
     (render-state [this state]
@@ -102,9 +105,9 @@
                     (do
                       (:tag data)   ;; TODO: Need to use the tag as the node
                       (apply dom/pre nil
-                             (om/build-all comp-node (:children data))))
+                             (om/build-all comp-node (:children data) {:opts opts})))
                     (do
-                      (om/build comp-terminal-node data))))))
+                      (om/build comp-terminal-node data {:opts opts}))))))
 
 ;; Keycodes
 (def BACKSPACE 8)
@@ -222,14 +225,31 @@
       nil)))
 
 
-(defn comp-richeditor [data owner]
+(defn comp-richeditor [data owner {:keys [readonly] :as opts}]
   (reify
     om/IInitState
     (init-state [_]
-                )
+                {:attrs (if readonly
+                          #js {}
+                          #js {:contentEditable true
+                               :spellCheck false
+                               :onClick (fn [e]
+                                          (println "Richeditor click")
+                                          (probe-for-caret))
+                               :onKeyDown (fn [e]
+                                            (handle-keypress e data))
+                               :onKeyUp (fn [e]
+                                          (handle-keypress e data))
+                               :onKeyPress (fn [e]
+                                             (handle-keypress e data))
+                               :onFocus (fn [e]
+                                          (om/set-state! owner :focused true))
+                               :onBlur (fn [e]
+                                          (om/set-state! owner :focused false))})
+                 :focused false})
     om/IWillMount
     (will-mount [_]
-                (let [click-chan (om/get-shared owner :click-chan)]
+                (when-let [click-chan (om/get-shared owner :click-chan)]
                   ;; Listen for clicks on terminal nodes so we can reset the caret
                   (go (loop []
                         (let [{:keys [path current-target]} (<! click-chan)
@@ -249,36 +269,24 @@
                         (recur)))))
     om/IRenderState
     (render-state [this state]
-                  (dom/div nil
-                           (apply dom/div #js {:contentEditable true
-                                               :spellCheck false
-                                               :onClick (fn [e]
-                                                          (println "Richeditor click")
-                                                          (probe-for-caret))
-                                               :onKeyDown (fn [e]
-                                                            (handle-keypress e data))
-                                               :onKeyUp (fn [e]
-                                                            (handle-keypress e data))
-                                               :onKeyPress (fn [e]
-                                                             (handle-keypress e data))}
-                                  (om/build-all comp-node (:dom data)))))
+                  (if-let [attrs (:attrs (om/get-state owner))]
+                    (dom/div nil
+                             (apply dom/div attrs
+                                    (om/build-all comp-node (:dom data) {:opts opts})))
+                    (throw (js/Error. (str "You must create a :click-chan in shared state")))))
     om/IDidUpdate
     (did-update [this prev-props prev-state]
                 ;; Update the caret location
-                (let [focus-path (-> data :caret :focus-path)
-                      dom-node (path->dom-node owner focus-path)
-                      focus-offset (-> data :caret :focus-offset)]
-                  (set-dom-caret dom-node focus-offset)))))
+                
+                (when (om/get-state owner :focused)
+                  (let [focus-path (-> data :caret :focus-path)
+                        dom-node (path->dom-node owner focus-path)
+                        focus-offset (-> data :caret :focus-offset)]
+                    (println "Setting dom caret: " dom-node)
+                    (set-dom-caret dom-node focus-offset))))))
 
 
-(let [click-chan (chan)]
-  (om/root comp-richeditor data4
-           {:target (. js/document (getElementById "editor"))
-            :shared {:click-chan click-chan   ;; Notifies the richeditor when clicks happen on a terminal node
-                     }
-            :tx-listen (fn [tx-data root-cursor]
-                         (println "tx-listen")
-                         nil)}))
+
 
 
 
@@ -304,6 +312,23 @@
                                                 (dom/td nil ":anchor-offset")
                                                 (dom/td nil (:anchor-offset data))))))))
 
+;; Om Roots
+
+(let [click-chan (chan)]
+  (om/root comp-richeditor data4
+           {:target (. js/document (getElementById "editor"))
+            :shared {:click-chan click-chan   ;; Notifies the richeditor when clicks happen on a terminal node
+                     }
+            :opts {:readonly false}
+            :tx-listen (fn [tx-data root-cursor]
+                         (println "tx-listen")
+                         nil)}))
+
+
 (om/root comp-caret data4
          {:target (. js/document (getElementById "caret"))
           :path [:caret]})
+
+(om/root comp-richeditor data4
+         {:target (. js/document (getElementById "viewer"))
+          :opts {:readonly true}})
