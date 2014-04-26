@@ -6,6 +6,7 @@
             [clojure.data :as data]
             [clojure.string :as string]
             [goog.dom :as gdom]
+            [goog.dom.Range :as grange]
             [goog.events :as gevents]))
 
 
@@ -38,12 +39,6 @@
                             dom-node)))]
     (traverse-down root-dom path)))
 
-
-(defn set-dom-caret [range]
-  (let [selection (-> js/window .getSelection)]
-    (.removeAllRanges selection)
-    (.addRange selection range)
-    nil))
 
 (defn get-dom-caret []
   (let [selection (-> js/window .getSelection)]
@@ -356,26 +351,11 @@
                         focus-dom-node (path->dom-node owner focus-path)
                         anchor-dom-node (path->dom-node owner anchor-path)
                         focus-offset (-> data :caret :focus-offset)
-                        anchor-offset (-> data :caret :anchor-offset)
-                        new-range (.createRange js/document)]
-                    (if (-> data :caret :is-collapsed)
-                      (do
-                        (println "Setting dom caret collapsed")
-                        (.setStart new-range (.-firstChild focus-dom-node) focus-offset)
-                        (.collapse new-range true))
-                      (do
-                        (println "Setting dom caret range")
-                        (if (focus-before-anchor? (:caret data))
-                          (do 
-                            (.setStart new-range (.-firstChild focus-dom-node) focus-offset)
-                            (.setEnd new-range (.-firstChild anchor-dom-node) anchor-offset)  
-                            )
-                          (do 
-                            (.setStart new-range (.-firstChild anchor-dom-node) anchor-offset)  
-                            (.setEnd new-range (.-firstChild focus-dom-node) focus-offset)
-                            ))))
-                    (set-dom-caret new-range)
-                    #_(set-dom-caret dom-node focus-offset))))))
+                        anchor-offset (-> data :caret :anchor-offset) ]
+                    (.select (grange/createFromNodes (.-firstChild anchor-dom-node) 
+                                                     anchor-offset
+                                                     (.-firstChild focus-dom-node)
+                                                     focus-offset)))))))
 
 
 
