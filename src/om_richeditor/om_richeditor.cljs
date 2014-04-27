@@ -76,13 +76,13 @@
 (defn probe-for-caret []
   "Forces a click on the element where the caret is"
   (let [selection (.getSelection js/window)
-        elem (.-focusNode selection)]
-    (println "Collapsed: " (.-isCollapsed selection))
+        focus-elem (.-focusNode selection)
+        anchor-elem (.-anchorNode selection)]
     (if (.-isCollapsed selection)
-      (fire-mouse-dom-event elem "probe-collapsed-node")
+      (fire-mouse-dom-event focus-elem "probe-collapsed-node")
       (do 
-        (fire-mouse-dom-event elem "probe-anchor-node")
-        (fire-mouse-dom-event elem "probe-focus-node")))))
+        (fire-mouse-dom-event anchor-elem "probe-anchor-node")
+        (fire-mouse-dom-event focus-elem "probe-focus-node")))))
 
 (defn keycode->char [keycode]
   (condp = keycode
@@ -235,16 +235,16 @@
                 ;; but let regular keystrokes pass through (like pressing a character)
                 UPARROW (do
                           (probe-for-caret)
-                          (println "up"))
+                          )
                 DOWNARROW (do
                             (probe-for-caret)
-                            (println "down"))
+                            )
                 LEFTARROW (do
                             (probe-for-caret)
-                            (println "left"))
+                            )
                 RIGHTARROW (do
                              (probe-for-caret)
-                             (println "right"))
+                             )
                 nil)
       "keypress" (let [keycode (.. e -which)
                        new-char (keycode->char keycode)]
@@ -343,19 +343,20 @@
                     (throw (js/Error. (str "You must create a :attrs in local state")))))
     om/IDidUpdate
     (did-update [this prev-props prev-state]
-                ;; Update the caret location
-                
-                (when (om/get-state owner :focused)
-                  (let [focus-path (-> data :caret :focus-path)
-                        anchor-path (-> data :caret :anchor-path)
-                        focus-dom-node (path->dom-node owner focus-path)
-                        anchor-dom-node (path->dom-node owner anchor-path)
-                        focus-offset (-> data :caret :focus-offset)
-                        anchor-offset (-> data :caret :anchor-offset) ]
-                    (.select (grange/createFromNodes (.-firstChild anchor-dom-node) 
-                                                     anchor-offset
-                                                     (.-firstChild focus-dom-node)
-                                                     focus-offset)))))))
+      ;; Update the caret location
+
+      (when (om/get-state owner :focused)
+        (let [focus-path (-> data :caret :focus-path)
+              anchor-path (-> data :caret :anchor-path)
+              focus-dom-node (path->dom-node owner focus-path)
+              anchor-dom-node (path->dom-node owner anchor-path)
+              focus-offset (-> data :caret :focus-offset)
+              anchor-offset (-> data :caret :anchor-offset)]
+          (println "Update nodes")
+          (.select (grange/createFromNodes (.-firstChild anchor-dom-node) 
+                                           anchor-offset
+                                           (.-firstChild focus-dom-node)
+                                           focus-offset)))))))
 
 
 
