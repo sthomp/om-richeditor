@@ -269,12 +269,12 @@
                      :anchor-offset (:anchor-offset dom-caret)
                      :focus-path path
                      :anchor-path path
-                     :is-collapsed true}
+                     :is-collapsed (:is-collapsed dom-caret)}
                     {:focus-offset 0
                      :anchor-offset 0
                      :focus-path path
                      :anchor-path path
-                     :is-collapsed true})]
+                     :is-collapsed (:is-collapsed dom-caret)})]
     (om/update! app :caret new-caret)))
 
 (defn update-focus-caret [app path]
@@ -381,7 +381,10 @@
                                                 (dom/td nil (str "[" (string/join " " (:anchor-path data)) "]")))
                                         (dom/tr nil
                                                 (dom/td nil ":anchor-offset")
-                                                (dom/td nil (:anchor-offset data))))))))
+                                                (dom/td nil (:anchor-offset data)))
+                                        (dom/tr nil
+                                                (dom/td nil ":is-collapsed")
+                                                (dom/td nil (str (:is-collapsed data)))))))))
 
 ;; Om Roots
 
