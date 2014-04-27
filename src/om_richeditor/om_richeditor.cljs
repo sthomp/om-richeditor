@@ -117,13 +117,13 @@
       {:attrs (if readonly
                 {}
                 {:onClick (fn [e]
-                            (.. e preventDefault)
                             (.. e stopPropagation)   ;; prevent parent nodes from receiving the click event
-                            (if-let [caret-chan (om/get-shared owner :click-chan)]
-                              (do
-                                (probe-for-caret)
-                                #_(notify-caret-collapsed data owner caret-chan))
-                              (throw (js/Error. (str "You must create a :click-chan in shared state")))))})})
+                            (fire-mouse-dom-event (-> owner om/get-node) "probe-collapsed-node"))
+                 :onMouseUp (fn [e]
+                              ;; We need to handle mouseup for the case when
+                              ;; the user clicks and drags to make a selection
+                              (probe-for-caret))
+                 })})
     om/IWillMount
     (will-mount [_]
                 )
@@ -344,7 +344,6 @@
     om/IDidUpdate
     (did-update [this prev-props prev-state]
       ;; Update the caret location
-
       (when (om/get-state owner :focused)
         (let [focus-path (-> data :caret :focus-path)
               anchor-path (-> data :caret :anchor-path)
@@ -352,7 +351,6 @@
               anchor-dom-node (path->dom-node owner anchor-path)
               focus-offset (-> data :caret :focus-offset)
               anchor-offset (-> data :caret :anchor-offset)]
-          (println "Update nodes")
           (.select (grange/createFromNodes (.-firstChild anchor-dom-node) 
                                            anchor-offset
                                            (.-firstChild focus-dom-node)
