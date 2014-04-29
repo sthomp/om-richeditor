@@ -78,6 +78,8 @@
   (let [selection (.getSelection js/window)
         focus-elem (.-focusNode selection)
         anchor-elem (.-anchorNode selection)]
+    (println "***Probe***")
+    (.log js/console anchor-elem focus-elem (.-anchorOffset selection) (.-focusOffset selection))
     (if (.-isCollapsed selection)
       (fire-mouse-dom-event focus-elem "probe-collapsed-node")
       (do 
@@ -93,9 +95,17 @@
         new-char))))
 
 (defn notify-caret [data owner caret-chan caret-type]
-  (put! caret-chan {:path (om.core/path data )
-                    :current-target (om/get-node owner)
-                    :caret-type caret-type }))
+  (let [dom-caret (get-dom-caret)]
+    (println "***Notify***")
+    (println "focus " (:focus-offset dom-caret))
+    (println "anchor " (:anchor-offset dom-caret))
+    (println "type " caret-type)
+    (put! caret-chan {:path (om.core/path data )
+                      :current-target (om/get-node owner)
+                      :caret-type caret-type 
+                      :dom-caret dom-caret }) 
+    )
+  )
 
 (defn notify-caret-collapsed [data owner caret-chan]
   "Send a notification to update the collapse caret"
@@ -116,14 +126,18 @@
       
       {:attrs (if readonly
                 {}
-                {:onClick (fn [e]
+                {:onMouseUp (fn [e]
+                            (println "Terminal mouseup")
                             (.. e stopPropagation)   ;; prevent parent nodes from receiving the click event
-                            (fire-mouse-dom-event (-> owner om/get-node) "probe-collapsed-node"))
-                 :onMouseUp (fn [e]
-                              ;; We need to handle mouseup for the case when
-                              ;; the user clicks and drags to make a selection
-                              (probe-for-caret))
-                 })})
+                            (probe-for-caret)
+                            ;; This timeout catches the case
+                            ;; where the user clicks a current
+                            ;; range selection
+                            (js/setTimeout 
+                              (fn [] 
+                                (println "***Timeout***")
+                                (probe-for-caret))
+                              1))})})
     om/IWillMount
     (will-mount [_]
                 )
@@ -137,6 +151,7 @@
             (gevents/listen (om/get-node owner) "probe-focus-node" (fn [e] 
                                                                      (notify-caret-focus data owner caret-chan)))
             (gevents/listen (om/get-node owner) "probe-collapsed-node" (fn [e] 
+                                                                         (println "probe-collapsed-node" (:is-collapsed (get-dom-caret)))
                                                                          (notify-caret-collapsed data owner caret-chan))))
           (throw (js/Error. (str "You must create a :click-chan in shared state")))) )
       )
@@ -261,9 +276,8 @@
                    (println "keypress"))
       nil)))
 
-(defn update-collapsed-caret [app path terminal-dom-node]
-  (let [dom-caret (get-dom-caret)
-        dom-node-caret (.. (:focusNode dom-caret) -parentNode)
+(defn update-collapsed-caret [app path terminal-dom-node dom-caret]
+  (let [ dom-node-caret (.. (:focusNode dom-caret) -parentNode)
         new-caret (if (identical? terminal-dom-node dom-node-caret)
                     {:focus-offset (:focus-offset dom-caret)
                      :anchor-offset (:anchor-offset dom-caret)
@@ -277,17 +291,17 @@
                      :is-collapsed (:is-collapsed dom-caret)})]
     (om/update! app :caret new-caret)))
 
-(defn update-focus-caret [app path]
- (let [dom-caret (get-dom-caret)]
-   (om/transact! app
-                 :caret
-                 #(conj % {:focus-offset (:focus-offset dom-caret) :focus-path path :is-collapsed false}))))
+(defn update-focus-caret [app path dom-caret]
+  (println "***Update Focus***")
+  (om/transact! app
+                :caret
+                #(conj % {:focus-offset (:focus-offset dom-caret) :focus-path path :is-collapsed false})))
 
-(defn update-anchor-caret [app path]
- (let [dom-caret (get-dom-caret)]
-   (om/transact! app
-                 :caret
-                 #(conj % {:anchor-offset (:anchor-offset dom-caret) :anchor-path path :is-collapsed false}))))
+(defn update-anchor-caret [app path dom-caret]
+  (println "***Update Anchor***")
+  (om/transact! app
+                :caret
+                #(conj % {:anchor-offset (:anchor-offset dom-caret) :anchor-path path :is-collapsed false})))
 
 (defn focus-before-anchor? [{:keys [focus-path focus-offset anchor-path anchor-offset] :as caret}]
   (cond
@@ -306,9 +320,9 @@
                 #js {}
                 #js {:contentEditable true
                      :spellCheck false
-                     :onClick (fn [e]
-                                (println "Richeditor click")
-                                (probe-for-caret))
+                     :onMouseUp (fn [e] 
+                                  (println "Richeditor mouseup")
+                                  (probe-for-caret))
                      :onKeyDown (fn [e]
                                   (handle-keypress e data))
                      :onKeyUp (fn [e]
@@ -325,13 +339,11 @@
                 (when-let [click-chan (om/get-shared owner :click-chan)]
                   ;; Listen for clicks on terminal nodes so we can reset the caret
                   (go (loop []
-                        (let [{:keys [path current-target caret-type]} (<! click-chan)
-                              dom-caret (get-dom-caret)
-                              dom-node-caret (.. (:focusNode dom-caret) -parentNode)]
+                        (let [{:keys [path current-target caret-type dom-caret]} (<! click-chan)]
                           (condp = caret-type
-                            :caret-collapsed (update-collapsed-caret data path current-target)
-                            :caret-focus (update-focus-caret data path)
-                            :caret-anchor (update-anchor-caret data path)
+                            :caret-collapsed (update-collapsed-caret data path current-target dom-caret)
+                            :caret-focus (update-focus-caret data path dom-caret)
+                            :caret-anchor (update-anchor-caret data path dom-caret)
                             (throw (js/Error. (str "Unknown caret-type" caret-type)))))
                         (recur)))))
     om/IRenderState
@@ -344,6 +356,8 @@
     om/IDidUpdate
     (did-update [this prev-props prev-state]
       ;; Update the caret location
+
+      (println "***Rerender***")
       (when (om/get-state owner :focused)
         (let [focus-path (-> data :caret :focus-path)
               anchor-path (-> data :caret :anchor-path)
@@ -351,6 +365,7 @@
               anchor-dom-node (path->dom-node owner anchor-path)
               focus-offset (-> data :caret :focus-offset)
               anchor-offset (-> data :caret :anchor-offset)]
+          (.log js/console anchor-dom-node anchor-offset focus-dom-node focus-offset)
           (.select (grange/createFromNodes (.-firstChild anchor-dom-node) 
                                            anchor-offset
                                            (.-firstChild focus-dom-node)
