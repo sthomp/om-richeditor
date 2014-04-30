@@ -1,4 +1,5 @@
 (ns sthomp.om-richeditor
+
   (:require-macros [cljs.core.async.macros :refer [go]])
   (:require [om.core :as om :include-macros true]
             [om.dom :as dom :include-macros true]
@@ -9,19 +10,21 @@
             [goog.dom.Range :as grange]
             [goog.events :as gevents]))
 
-
+;; [sthomp.om-richeditor :as macros]
 (enable-console-print!)
 
 (def data4 (atom {:dom [{:tag "a" :text "Some Terminal Node2" :attrs {:href "http://www.google.com" :rel "nofollow" :target "_blank"}}
                         {:tag "span" :text "Hello world"}
-                        {:tag "p" :children [{:tag "span" :text "Child1"}
+                        {:tag "div" :children [{:tag "span" :text "Child1"}
                                              {:tag "span" :text "Child2"}
-                                             {:tag "p" :children [{:tag "span" :text "GrandChild1"}
+                                             {:tag "div" :children [{:tag "span" :text "GrandChild1"}
                                                                   {:tag "span" :text "GrandChild2"}
                                                                   {:tag "p" :text "GrandChild3"}
                                                                   {:tag "p" :children [{:tag "span" :text "GrandChild2"}
                                                                                        {:tag "span" :text "GrandChild3"}]}]}]}
-                        {:tag "p" :text "Another line..."}]
+                        {:tag "pre" :text "Another line..."}
+                        {:tag "ul" :children [{:tag "li" :text "List Item1"}
+                                              {:tag "li" :text "List Item2"}]}]
                   :caret {:focus-path []
                           :focus-offset 0
                           :anchor-offset 0
@@ -51,6 +54,19 @@
 
 
 
+(defn tag->om-dom [tag-str]
+  (case tag-str
+    "span" dom/span
+    "em" dom/em
+    "p" dom/p
+    "a" dom/a
+    "ul" dom/ul
+    "li" dom/li
+    "pre" dom/pre
+    "div" dom/div
+    (throw (js/Error. (str "Unknown node tag for inner node: " tag-str))))
+  )
+
 (defn json-terminal-node->om-node
   "additional-attrs is an *optional* map of additional attributes."
   ([json-node]
@@ -59,12 +75,7 @@
      (let [text (:text json-node)
            attrs (merge (:attrs json-node) additional-attrs)
            js-attrs (clj->js attrs)]
-       (case (:tag json-node)
-         "span" (dom/span js-attrs text)
-         "em" (dom/em js-attrs text)
-         "p" (dom/p js-attrs text)
-         "a" (dom/a js-attrs text)
-         (throw (js/Error. (str "Unknown node tag: " (:tag json-node))))))))
+       ((tag->om-dom (:tag json-node)) js-attrs text))))
 
 
 (defn fire-mouse-dom-event [elem event-type]
@@ -162,9 +173,8 @@
     (render-state [this state]
                   (if (contains? data :children)
                     (do
-                      (:tag data)   ;; TODO: Need to use the tag as the node
-                      (apply dom/pre nil
-                             (om/build-all comp-node (:children data) {:opts opts})))
+                      (apply(tag->om-dom (:tag data)) nil
+                                         (om/build-all comp-node (:children data) {:opts opts})))
                     (do
                       (om/build comp-terminal-node data {:opts opts}))))))
 
