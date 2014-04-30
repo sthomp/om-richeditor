@@ -86,13 +86,6 @@
         (fire-mouse-dom-event anchor-elem "probe-anchor-node")
         (fire-mouse-dom-event focus-elem "probe-focus-node")))))
 
-(defn keycode->char [keycode]
-  (condp = keycode
-    32 "\u00a0"
-    (let [new-char (char keycode)]
-      (if (string/blank? new-char)
-        nil
-        new-char))))
 
 (defn notify-caret [data owner caret-chan caret-type]
   (let [dom-caret (get-dom-caret)]
@@ -182,6 +175,8 @@
 (def RIGHTARROW 39)
 (def UPARROW 38)
 (def DOWNARROW 40)
+(def SPACEBAR 32)
+
 
 
 
@@ -219,6 +214,11 @@
 
 (defn get-text-value [root-data path]
   (get-in @root-data (conj path :text)))
+
+(defn is-text-valid? [text] 
+  (if (re-find #"\s{2,}" text)
+    false
+    true))
 
 (defn handle-keypress [e root-data]
   (let [caret (-> @root-data :caret)
@@ -262,18 +262,23 @@
                              )
                 nil)
       "keypress" (let [keycode (.. e -which)
-                       new-char (keycode->char keycode)]
+                       new-char (char keycode)]
                    (.. e preventDefault)
                    (let [current-value (get-text-value root-data focus-path)
                          new-value (str (subs current-value 0 focus-offset) new-char (subs current-value focus-offset))
                          char-diff (string-length-diff current-value new-value)]
-                     (println "|" (count (str "a" "" "b")) "|")
-                     (om/transact! root-data (conj focus-path :text)
-                                   (fn [text]
-                                     new-value))
-                     (println "Move caret by " char-diff " chars")
-                     (move-caret-offset char-diff root-data))
-                   (println "keypress"))
+                     (if (is-text-valid? new-value) 
+                       (do
+                         (om/transact! root-data (conj focus-path :text)
+                                       (fn [text]
+                                         new-value))
+                         (move-caret-offset char-diff root-data))
+                       ;; If pressing space then update the cursor but not the text
+                       (when (and (= keycode SPACEBAR)
+                                  (or 
+                                    (= \space (.charAt current-value focus-offset))
+                                    (= \u00a0 (.charAt current-value focus-offset)))) 
+                         (move-caret-offset 1 root-data)))))
       nil)))
 
 (defn update-collapsed-caret [app path terminal-dom-node dom-caret]
@@ -357,7 +362,6 @@
     (did-update [this prev-props prev-state]
       ;; Update the caret location
 
-      (println "***Rerender***")
       (when (om/get-state owner :focused)
         (let [focus-path (-> data :caret :focus-path)
               anchor-path (-> data :caret :anchor-path)
@@ -365,7 +369,6 @@
               anchor-dom-node (path->dom-node owner anchor-path)
               focus-offset (-> data :caret :focus-offset)
               anchor-offset (-> data :caret :anchor-offset)]
-          (.log js/console anchor-dom-node anchor-offset focus-dom-node focus-offset)
           (.select (grange/createFromNodes (.-firstChild anchor-dom-node) 
                                            anchor-offset
                                            (.-firstChild focus-dom-node)
