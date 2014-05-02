@@ -15,7 +15,7 @@
              ;; For interactive development
              ;; See http://rigsomelight.com/2014/05/01/interactive-programming-flappy-bird-clojurescript.html
              {:id "figwheelbuild"
-              :source-paths ["src"]
+              :source-paths ["src" "examples/bootstrap"]
               :compiler {
                          :output-to "resources/public/js/out/om-richeditor.js"
                          :output-dir "resources/public/js/out"

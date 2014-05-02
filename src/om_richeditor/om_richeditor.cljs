@@ -6,8 +6,7 @@
             [clojure.string :as string]
             [goog.dom :as gdom]
             [goog.dom.Range :as grange]
-            [goog.events :as gevents]
-            [figwheel.client :as fw :include-macros true])
+            [goog.events :as gevents])
   (:require-macros [cljs.core.async.macros :refer [go]])
   )
 
@@ -441,9 +440,5 @@
     (.. js/document (getElementById "viewer") -firstChild -firstChild -firstChild focus))
   3000)
 
-(fw/watch-and-reload  :jsload-callback (fn []
-                                         ;; you would add this if you
-                                         ;; have more than one file
-                                         #_(reset! flap-state @flap-state)
-                                         ))
+
 
