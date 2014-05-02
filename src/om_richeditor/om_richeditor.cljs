@@ -1,6 +1,4 @@
 (ns sthomp.om-richeditor
-
-  (:require-macros [cljs.core.async.macros :refer [go]])
   (:require [om.core :as om :include-macros true]
             [om.dom :as dom :include-macros true]
             [cljs.core.async :refer [put! chan <! close!]]
@@ -8,7 +6,10 @@
             [clojure.string :as string]
             [goog.dom :as gdom]
             [goog.dom.Range :as grange]
-            [goog.events :as gevents]))
+            [goog.events :as gevents]
+            [figwheel.client :as fw :include-macros true])
+  (:require-macros [cljs.core.async.macros :refer [go]])
+  )
 
 ;; [sthomp.om-richeditor :as macros]
 (enable-console-print!)
@@ -433,10 +434,16 @@
 (om/root comp-richeditor data4
          {:target (. js/document (getElementById "viewer"))
           :opts {:readonly true}})
-
 #_(js/setTimeout 
   (fn [] 
     (println "timeout")
     ;; document.getElementById("viewer").firstChild.firstChild.firstChild.focus()
     (.. js/document (getElementById "viewer") -firstChild -firstChild -firstChild focus))
   3000)
+
+(fw/watch-and-reload  :jsload-callback (fn []
+                                         ;; you would add this if you
+                                         ;; have more than one file
+                                         #_(reset! flap-state @flap-state)
+                                         ))
+
