@@ -43,6 +43,17 @@
     (traverse-down root-dom path)))
 
 
+#_(defn remove-node [root-data path]
+  {:pre [(> (count path) 0)]}
+  (let [parent-path (subvec path 0 (dec (count path)))
+        parent-elem (get-in root-data parent-path)
+        elem (get-in root-data path)
+        index-to-remove (last path)]
+    (assert (vector? parent-elem))
+    (last path)
+    (vec (concat (subvec parent-elem 0 (dec index-to-remove)) (subvec parent-elem index-to-remove (count parent-elem))))
+    ))
+
 (defn get-dom-caret []
   (let [selection (-> js/window .getSelection)]
     {:focusNode (.-focusNode selection)
