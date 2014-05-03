@@ -27,7 +27,7 @@
     (traverse-down root-dom path)))
 
 
-#_(defn remove-node [root-data path]
+(defn remove-node [root-data path]
   {:pre [(> (count path) 0)]}
   (let [parent-path (subvec path 0 (dec (count path)))
         parent-elem (get-in root-data parent-path)
@@ -85,7 +85,6 @@
         focus-elem (.-focusNode selection)
         anchor-elem (.-anchorNode selection)]
     (println "***Probe***")
-    (.log js/console anchor-elem focus-elem (.-anchorOffset selection) (.-focusOffset selection))
     (if (.-isCollapsed selection)
       (fire-mouse-dom-event focus-elem "probe-collapsed-node")
       (do 
@@ -185,40 +184,16 @@
 
 
 
-
-
-(defn move-caret-offset [n root-data]
+(defn move-caret-offset [n caret]
   "Move the caret forward/back by n characters"
-  (om/transact! root-data [:caret]
-                (fn [caret]
-                  (let [{:keys [focus-offset anchor-offset]} caret
-                        new-offset (+ focus-offset n)]
-                    (assoc caret
-                      :focus-offset new-offset
-                      :anchor-offset new-offset)))))
-
-(defn caret-action [action root-data]
-  "TODO: Change this so that it automatically increments/decrements by the difference in length of the text string"
-  (condp = action
-    :caret-inc (om/transact! root-data [:caret]
-                             (fn [caret]
-                               (let [{:keys [focus-offset anchor-offset]} caret]
-                                 (assoc caret
-                                   :focus-offset (inc focus-offset)
-                                   :anchor-offset (inc anchor-offset)))))
-    :caret-dec (om/transact! root-data [:caret]
-                             (fn [caret]
-                               (let [{:keys [focus-offset anchor-offset]} caret]
-                                 (assoc caret
-                                   :focus-offset (dec focus-offset)
-                                   :anchor-offset (dec anchor-offset)))))
-    (throw (js/Error. (str "Unknown caret-action: " action)))))
+  (let [{:keys [focus-offset anchor-offset]} caret
+        new-offset (+ focus-offset n)]
+    (assoc caret
+           :focus-offset new-offset
+           :anchor-offset new-offset)))
 
 (defn string-length-diff [str1 str2]
   (- (count str2) (count str1)))
-
-(defn get-text-value [root-data path]
-  (get-in @root-data (conj path :text)))
 
 (defn is-text-valid? [text] 
   (if (re-find #"\s{2,}" text)
@@ -233,22 +208,22 @@
                   ;; TODO: Delete the node from the data model if its length is 0
                   BACKSPACE (do
                               (.. e preventDefault)
-                              (let [current-value (get-text-value root-data focus-path)
-                                    new-value (str (subs current-value 0 (dec focus-offset)) (subs current-value focus-offset))
-                                    char-diff (string-length-diff current-value new-value)]
-                                (om/transact! root-data (conj focus-path :text)
-                                              (fn [text]
-                                                new-value))
-                                (move-caret-offset char-diff root-data)))
+                              (om/transact! root-data 
+                                            (fn [data]
+                                              (let [text-path (conj focus-path :text)
+                                                    current-value (get-in data text-path)
+                                                    new-value (str (subs current-value 0 (dec focus-offset)) (subs current-value focus-offset))
+                                                    char-diff (string-length-diff current-value new-value)
+                                                    new-caret (move-caret-offset char-diff (:caret data))]
+                                                (-> data
+                                                    (assoc-in text-path new-value)
+                                                    (assoc :caret new-caret))))))
                   DELETE (do
                            (.. e preventDefault)
-                           (let [current-value (get-text-value root-data focus-path)
-                                 new-value (str (subs current-value 0 focus-offset) (subs current-value (inc focus-offset)))
-                                 char-diff (string-length-diff current-value new-value)]
-                             (om/transact! root-data (conj focus-path :text)
-                                           (fn [text]
-                                             new-value)))
-                           (println "delete"))
+                           (om/transact! root-data (conj focus-path :text)
+                                           (fn [current-value]
+                                             (let [new-value (str (subs current-value 0 focus-offset) (subs current-value (inc focus-offset)))]
+                                               new-value))))
                   nil)
       "keyup" (condp = (.. e -which)
                 ;; Block certain keystrokes from propogating to keypress
@@ -269,21 +244,24 @@
       "keypress" (let [keycode (.. e -which)
                        new-char (char keycode)]
                    (.. e preventDefault)
-                   (let [current-value (get-text-value root-data focus-path)
-                         new-value (str (subs current-value 0 focus-offset) new-char (subs current-value focus-offset))
-                         char-diff (string-length-diff current-value new-value)]
-                     (if (is-text-valid? new-value) 
-                       (do
-                         (om/transact! root-data (conj focus-path :text)
-                                       (fn [text]
-                                         new-value))
-                         (move-caret-offset char-diff root-data))
-                       ;; If pressing space then update the cursor but not the text
-                       (when (and (= keycode SPACEBAR)
-                                  (or 
-                                    (= \space (.charAt current-value focus-offset))
-                                    (= \u00a0 (.charAt current-value focus-offset)))) 
-                         (move-caret-offset 1 root-data)))))
+
+                   (om/transact! root-data
+                                 (fn [data]
+                                   (let [text-path (conj focus-path :text)
+                                         current-value (get-in data text-path)
+                                         new-value (str (subs current-value 0 focus-offset) new-char (subs current-value focus-offset))
+                                         char-diff (string-length-diff current-value new-value)
+                                         new-caret (move-caret-offset char-diff (:caret data))]
+                                     (if (is-text-valid? new-value)
+                                       (-> data
+                                             (assoc-in text-path new-value)
+                                             (assoc :caret new-caret))
+                                       (if (and (= keycode SPACEBAR)
+                                                  (or 
+                                                    (= \space (.charAt current-value focus-offset))
+                                                    (= \u00a0 (.charAt current-value focus-offset))))
+                                         (assoc data :caret (move-caret-offset 1 (:caret data)))
+                                         data))))))
       nil)))
 
 (defn update-collapsed-caret [app path terminal-dom-node dom-caret]

@@ -24,6 +24,14 @@
                           :anchor-path []
                           :is-collapsed true }}))
 
+(defn run-tests []
+  (edtr/remove-node data4 [1])
+  )
+
+
+#_(run-tests)
+
+;; om roots
 
 (let [click-chan (chan)]
   (om/root edtr/comp-richeditor data4
@@ -44,7 +52,7 @@
           :opts {:readonly true}})
 
 
-(fw/watch-and-reload  :jsload-callback (fn []
+#_(fw/watch-and-reload  :jsload-callback (fn []
                                          ;; you would add this if you
                                          ;; have more than one file
                                          #_(reset! flap-state @flap-state)
