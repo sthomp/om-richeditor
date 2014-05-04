@@ -94,10 +94,6 @@
 
 (defn notify-caret [data owner caret-chan caret-type]
   (let [dom-caret (get-dom-caret)]
-    (println "***Notify***")
-    (println "focus " (:focus-offset dom-caret))
-    (println "anchor " (:anchor-offset dom-caret))
-    (println "type " caret-type)
     (put! caret-chan {:path (om.core/path data )
                       :current-target (om/get-node owner)
                       :caret-type caret-type 
@@ -201,68 +197,71 @@
     true))
 
 (defn handle-keypress [e root-data]
-  (let [caret (-> @root-data :caret)
-        {:keys [focus-path focus-offset anchor-offset]} caret]
-    (condp = (.. e -type)
-      "keydown" (condp = (.. e -which)
-                  ;; TODO: Delete the node from the data model if its length is 0
-                  BACKSPACE (do
-                              (.. e preventDefault)
-                              (om/transact! root-data 
-                                            (fn [data]
-                                              (let [text-path (conj focus-path :text)
-                                                    current-value (get-in data text-path)
-                                                    new-value (str (subs current-value 0 (dec focus-offset)) (subs current-value focus-offset))
-                                                    char-diff (string-length-diff current-value new-value)
-                                                    new-caret (move-caret-offset char-diff (:caret data))]
-                                                (-> data
-                                                    (assoc-in text-path new-value)
-                                                    (assoc :caret new-caret))))))
-                  DELETE (do
-                           (.. e preventDefault)
-                           (om/transact! root-data (conj focus-path :text)
-                                           (fn [current-value]
-                                             (let [new-value (str (subs current-value 0 focus-offset) (subs current-value (inc focus-offset)))]
-                                               new-value))))
-                  nil)
-      "keyup" (condp = (.. e -which)
-                ;; Block certain keystrokes from propogating to keypress
-                ;; but let regular keystrokes pass through (like pressing a character)
-                UPARROW (do
+  (condp = (.. e -type)
+    "keydown" (condp = (.. e -which)
+                ;; TODO: Delete the node from the data model if its length is 0
+                BACKSPACE (do
+                            (.. e preventDefault)
+                            (om/transact! root-data 
+                                          (fn [data]
+                                            (let [caret (:caret data)
+                                                  {:keys [focus-path focus-offset anchor-offset]} caret
+                                                  text-path (conj focus-path :text)
+                                                  current-value (get-in data text-path)
+                                                  new-value (str (subs current-value 0 (dec focus-offset)) (subs current-value focus-offset))
+                                                  char-diff (string-length-diff current-value new-value)
+                                                  new-caret (move-caret-offset char-diff caret)]
+                                              (-> data
+                                                  (assoc-in text-path new-value)
+                                                  (assoc :caret new-caret))))))
+                DELETE (do
+                         (.. e preventDefault)
+                         (om/transact! root-data
+                                       (fn [data]
+                                         (let [caret (:caret data)
+                                               {:keys [focus-path focus-offset anchor-offset]} caret
+                                               text-path (conj focus-path :text)
+                                               current-value (get-in data text-path)
+                                               new-value (str (subs current-value 0 focus-offset) (subs current-value (inc focus-offset)))]
+                                           (assoc-in data text-path new-value))))) 
+                nil)
+    "keyup" (condp = (.. e -which)
+              UPARROW (do
+                        (probe-for-caret)
+                        )
+              DOWNARROW (do
                           (probe-for-caret)
                           )
-                DOWNARROW (do
-                            (probe-for-caret)
-                            )
-                LEFTARROW (do
-                            (probe-for-caret)
-                            )
-                RIGHTARROW (do
-                             (probe-for-caret)
-                             )
-                nil)
-      "keypress" (let [keycode (.. e -which)
-                       new-char (char keycode)]
-                   (.. e preventDefault)
-
-                   (om/transact! root-data
-                                 (fn [data]
-                                   (let [text-path (conj focus-path :text)
-                                         current-value (get-in data text-path)
-                                         new-value (str (subs current-value 0 focus-offset) new-char (subs current-value focus-offset))
-                                         char-diff (string-length-diff current-value new-value)
-                                         new-caret (move-caret-offset char-diff (:caret data))]
-                                     (if (is-text-valid? new-value)
-                                       (-> data
-                                             (assoc-in text-path new-value)
-                                             (assoc :caret new-caret))
-                                       (if (and (= keycode SPACEBAR)
-                                                  (or 
-                                                    (= \space (.charAt current-value focus-offset))
-                                                    (= \u00a0 (.charAt current-value focus-offset))))
-                                         (assoc data :caret (move-caret-offset 1 (:caret data)))
-                                         data))))))
-      nil)))
+              LEFTARROW (do
+                          (probe-for-caret)
+                          )
+              RIGHTARROW (do
+                           (probe-for-caret)
+                           )
+              nil)
+    "keypress" (let [keycode (.. e -which)
+                     new-char (char keycode)]
+                 (.. e preventDefault)
+                 (om/transact! root-data
+                               (fn [data]
+                                 (let [caret (:caret data)
+                                       {:keys [focus-path focus-offset anchor-offset]} caret
+                                       text-path (conj focus-path :text)
+                                       current-value (get-in data text-path)
+                                       new-value (str (subs current-value 0 focus-offset) new-char (subs current-value focus-offset))
+                                       char-diff (string-length-diff current-value new-value)
+                                       new-caret (move-caret-offset char-diff (:caret data))]
+                                   (if (is-text-valid? new-value)
+                                     (-> data
+                                         (assoc-in text-path new-value)
+                                         (assoc :caret new-caret))
+                                     (if (and (= keycode SPACEBAR)
+                                              (or 
+                                                (= \space (.charAt current-value focus-offset))
+                                                (= \u00a0 (.charAt current-value focus-offset))))
+                                       (assoc data :caret (move-caret-offset 1 (:caret data)))
+                                       data))))))
+    nil))
 
 (defn update-collapsed-caret [app path terminal-dom-node dom-caret]
   (let [ dom-node-caret (.. (:focusNode dom-caret) -parentNode)
@@ -351,10 +350,13 @@
               focus-dom-node (path->dom-node owner focus-path)
               anchor-dom-node (path->dom-node owner anchor-path)
               focus-offset (-> data :caret :focus-offset)
-              anchor-offset (-> data :caret :anchor-offset)]
-          (.select (grange/createFromNodes (.-firstChild anchor-dom-node) 
+              anchor-offset (-> data :caret :anchor-offset)
+              focus-dom-node-caret (if (.-firstChild focus-dom-node) (.-firstChild focus-dom-node) focus-dom-node)
+              anchor-dom-node-caret (if (.-firstChild anchor-dom-node) (.-firstChild anchor-dom-node) anchor-dom-node)
+              ]
+          (.select (grange/createFromNodes anchor-dom-node-caret 
                                            anchor-offset
-                                           (.-firstChild focus-dom-node)
+                                           focus-dom-node-caret
                                            focus-offset)))))))
 
 
