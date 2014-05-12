@@ -1,6 +1,7 @@
 (ns sthomp.om-richeditor
   (:require [om.core :as om :include-macros true]
             [om.dom :as dom :include-macros true]
+            [sablono.core :as html :refer-macros [html]]
             [cljs.core.async :refer [put! chan <! close!]]
             [clojure.data :as data]
             [clojure.string :as string]
@@ -13,19 +14,23 @@
 ;; [sthomp.om-richeditor :as macros]
 (enable-console-print!)
 
+(def not-nil? (complement nil?))
 
-(defn path->dom-node [root-owner path]
-  (let [root-dom (-> root-owner
-                     om/get-node
-                     .-firstChild)
-        traverse-down (fn traverse-down [dom-node path]
-                        (let [path-head (drop-while #(not (number? %)) path)]
-                          (if-let [child-idx (first path-head)]
-                            (let [child-at-path (-> dom-node .-children (aget child-idx))]
-                              (traverse-down child-at-path (drop 1 path-head)))
-                            dom-node)))]
-    (traverse-down root-dom path)))
-
+(defn parse-hiccup-node [node]
+  (assert (sequential? node) (str "A hiccup node must sequential: " node))
+  (assert (keyword? (first node)) (str "A hiccup node must start with a keyword: " node))
+  (let [[tag & tail] node
+        [attrs content content-idx] (if (map? (first tail))
+                                      [(first tail) (next tail) 2]
+                                      [{} tail 1])]
+    (cond
+      ;; Empty node
+      (or (nil? content)
+          (empty? content)) [tag attrs "" content-idx]
+      ;; String node
+      (and (= 1 (count content))
+           (string? (first content))) [tag attrs (first content) content-idx]
+      :else [tag attrs content content-idx])))
 
 (defn remove-node [root-data path]
   {:pre [(> (count path) 0)]}
@@ -48,31 +53,6 @@
 
 
 
-
-(defn tag->om-dom [tag-str]
-  (case tag-str
-    "span" dom/span
-    "em" dom/em
-    "p" dom/p
-    "a" dom/a
-    "ul" dom/ul
-    "li" dom/li
-    "pre" dom/pre
-    "div" dom/div
-    (throw (js/Error. (str "Unknown node tag for inner node: " tag-str))))
-  )
-
-(defn json-terminal-node->om-node
-  "additional-attrs is an *optional* map of additional attributes."
-  ([json-node]
-     (json-terminal-node->om-node json-node {}))
-  ([json-node additional-attrs]
-     (let [text (:text json-node)
-           attrs (merge (:attrs json-node) additional-attrs)
-           js-attrs (clj->js attrs)]
-       ((tag->om-dom (:tag json-node)) js-attrs text))))
-
-
 (defn fire-mouse-dom-event [elem event-type]
   "Fire an event of type event-type on the elem where elem is a dom node"
   (let [ev-obj (.createEvent js/document "MouseEvents")]
@@ -86,7 +66,8 @@
         anchor-elem (.-anchorNode selection)]
     (println "***Probe***")
     (if (.-isCollapsed selection)
-      (fire-mouse-dom-event focus-elem "probe-collapsed-node")
+      (do
+        (fire-mouse-dom-event focus-elem "probe-collapsed-node"))
       (do 
         (fire-mouse-dom-event anchor-elem "probe-anchor-node")
         (fire-mouse-dom-event focus-elem "probe-focus-node")))))
@@ -97,7 +78,8 @@
     (put! caret-chan {:path (om.core/path data )
                       :current-target (om/get-node owner)
                       :caret-type caret-type 
-                      :dom-caret dom-caret }) 
+                      :dom-caret dom-caret
+                      :text-node (om/get-node owner "text-node")}) 
     )
   )
 
@@ -112,6 +94,10 @@
 (defn notify-caret-anchor [data owner caret-chan]
   "Send a notification to update only the anchor caret"
   (notify-caret data owner caret-chan :caret-anchor))
+
+
+
+
 
 (defn comp-terminal-node [data owner {:keys [readonly] :as opts}]
   (reify
@@ -131,7 +117,9 @@
                               (fn [] 
                                 (println "***Timeout***")
                                 (probe-for-caret))
-                              1))})})
+                              1))
+                 :ref "text-node"}
+                )})
     om/IWillMount
     (will-mount [_]
                 )
@@ -151,22 +139,35 @@
       )
     om/IRenderState
     (render-state [this state]
-                  (let [{:keys [attrs]} (om/get-state owner)]
-                    (json-terminal-node->om-node data attrs)))
+      (let [[tag attrs content _] (parse-hiccup-node data)
+            local-attrs (:attrs state)
+            merged-attrs (merge attrs local-attrs)]
+        (assert (or (nil? content) (string? content)) "The content of terminal nodes can only be nil or a string")
+        (html [tag merged-attrs content])
+        ))
     om/IDidUpdate
     (did-update [this prev-props prev-state]
                 )))
+
+
 
 (defn comp-node [data owner {:keys [readonly] :as opts}]
   (reify
     om/IRenderState
     (render-state [this state]
-                  (if (contains? data :children)
-                    (do
-                      (apply(tag->om-dom (:tag data)) nil
-                                         (om/build-all comp-node (:children data) {:opts opts})))
-                    (do
-                      (om/build comp-terminal-node data {:opts opts}))))))
+      ;; Has children
+      (let [[tag attrs content _] (parse-hiccup-node data)]
+        (if (sequential? content)
+          (do
+            ;; Has children
+            (html
+              [tag
+               (map-indexed #(om/build comp-node %2 {:opts opts :react-key %1}) content)
+               ]))
+          ;; No children
+          (do 
+            (om/build comp-terminal-node data {:opts opts})
+            ))))))
 
 ;; Keycodes
 (def BACKSPACE 8)
@@ -196,6 +197,7 @@
     false
     true))
 
+
 (defn handle-keypress [e root-data]
   (condp = (.. e -type)
     "keydown" (condp = (.. e -which)
@@ -205,8 +207,10 @@
                             (om/transact! root-data 
                                           (fn [data]
                                             (let [caret (:caret data)
-                                                  {:keys [focus-path focus-offset anchor-offset]} caret
-                                                  text-path (conj focus-path :text)
+                                                  {:keys [focus-path focus-offset anchor-path anchor-offset]} caret
+                                                  anchor-node (get-in data anchor-path)
+                                                  [_ _ _ content-idx] (parse-hiccup-node anchor-node)
+                                                  text-path (conj focus-path content-idx)
                                                   current-value (get-in data text-path)
                                                   new-value (str (subs current-value 0 (dec focus-offset)) (subs current-value focus-offset))
                                                   char-diff (string-length-diff current-value new-value)
@@ -219,8 +223,10 @@
                          (om/transact! root-data
                                        (fn [data]
                                          (let [caret (:caret data)
-                                               {:keys [focus-path focus-offset anchor-offset]} caret
-                                               text-path (conj focus-path :text)
+                                               {:keys [focus-path focus-offset anchor-path anchor-offset]} caret
+                                               anchor-node (get-in data anchor-path)
+                                               [_ _ _ content-idx] (parse-hiccup-node anchor-node)
+                                               text-path (conj focus-path content-idx)
                                                current-value (get-in data text-path)
                                                new-value (str (subs current-value 0 focus-offset) (subs current-value (inc focus-offset)))]
                                            (assoc-in data text-path new-value))))) 
@@ -245,8 +251,10 @@
                  (om/transact! root-data
                                (fn [data]
                                  (let [caret (:caret data)
-                                       {:keys [focus-path focus-offset anchor-offset]} caret
-                                       text-path (conj focus-path :text)
+                                       {:keys [focus-path focus-offset anchor-path anchor-offset]} caret
+                                       anchor-node (get-in data anchor-path)
+                                       [_ _ _ content-idx] (parse-hiccup-node anchor-node)
+                                       text-path (conj focus-path content-idx)
                                        current-value (get-in data text-path)
                                        new-value (str (subs current-value 0 focus-offset) new-char (subs current-value focus-offset))
                                        char-diff (string-length-diff current-value new-value)
@@ -263,32 +271,37 @@
                                        data))))))
     nil))
 
-(defn update-collapsed-caret [app path terminal-dom-node dom-caret]
+(defn update-collapsed-caret [app path terminal-dom-node dom-caret text-node]
   (let [ dom-node-caret (.. (:focusNode dom-caret) -parentNode)
         new-caret (if (identical? terminal-dom-node dom-node-caret)
                     {:focus-offset (:focus-offset dom-caret)
                      :anchor-offset (:anchor-offset dom-caret)
                      :focus-path path
                      :anchor-path path
+                     :focus-text-node text-node
+                     :anchor-text-node text-node
                      :is-collapsed (:is-collapsed dom-caret)}
                     {:focus-offset 0
                      :anchor-offset 0
                      :focus-path path
                      :anchor-path path
+                     :focus-text-node text-node
+                     :anchor-text-node text-node
                      :is-collapsed (:is-collapsed dom-caret)})]
+    (println "updating caret " new-caret)
     (om/update! app :caret new-caret)))
 
-(defn update-focus-caret [app path dom-caret]
+(defn update-focus-caret [app path dom-caret text-node]
   (println "***Update Focus***")
   (om/transact! app
                 :caret
-                #(conj % {:focus-offset (:focus-offset dom-caret) :focus-path path :is-collapsed false})))
+                #(conj % {:focus-offset (:focus-offset dom-caret) :focus-path path :is-collapsed false :focus-text-node text-node})))
 
-(defn update-anchor-caret [app path dom-caret]
+(defn update-anchor-caret [app path dom-caret text-node]
   (println "***Update Anchor***")
   (om/transact! app
                 :caret
-                #(conj % {:anchor-offset (:anchor-offset dom-caret) :anchor-path path :is-collapsed false})))
+                #(conj % {:anchor-offset (:anchor-offset dom-caret) :anchor-path path :is-collapsed false :anchor-text-node text-node})))
 
 (defn focus-before-anchor? [{:keys [focus-path focus-offset anchor-path anchor-offset] :as caret}]
   (cond
@@ -317,6 +330,7 @@
                      :onKeyPress (fn [e]
                                    (handle-keypress e data))
                      :onFocus (fn [e]
+                                ;; TODO: probe for caret when focused
                                 (om/set-state! owner :focused true))
                      :onBlur (fn [e]
                                (om/set-state! owner :focused false))})
@@ -326,11 +340,11 @@
                 (when-let [click-chan (om/get-shared owner :click-chan)]
                   ;; Listen for clicks on terminal nodes so we can reset the caret
                   (go (loop []
-                        (let [{:keys [path current-target caret-type dom-caret]} (<! click-chan)]
+                        (let [{:keys [path current-target caret-type dom-caret text-node]} (<! click-chan)]
                           (condp = caret-type
-                            :caret-collapsed (update-collapsed-caret data path current-target dom-caret)
-                            :caret-focus (update-focus-caret data path dom-caret)
-                            :caret-anchor (update-anchor-caret data path dom-caret)
+                            :caret-collapsed (update-collapsed-caret data path current-target dom-caret text-node)
+                            :caret-focus (update-focus-caret data path dom-caret text-node)
+                            :caret-anchor (update-anchor-caret data path dom-caret text-node)
                             (throw (js/Error. (str "Unknown caret-type" caret-type)))))
                         (recur)))))
     om/IRenderState
@@ -343,21 +357,22 @@
     om/IDidUpdate
     (did-update [this prev-props prev-state]
       ;; Update the caret location
-
       (when (om/get-state owner :focused)
         (let [focus-path (-> data :caret :focus-path)
               anchor-path (-> data :caret :anchor-path)
-              focus-dom-node (path->dom-node owner focus-path)
-              anchor-dom-node (path->dom-node owner anchor-path)
               focus-offset (-> data :caret :focus-offset)
               anchor-offset (-> data :caret :anchor-offset)
-              focus-dom-node-caret (if (.-firstChild focus-dom-node) (.-firstChild focus-dom-node) focus-dom-node)
-              anchor-dom-node-caret (if (.-firstChild anchor-dom-node) (.-firstChild anchor-dom-node) anchor-dom-node)
+              focus-text-node (-> data :caret :focus-text-node)
+              anchor-text-node (-> data :caret :anchor-text-node)
               ]
-          (.select (grange/createFromNodes anchor-dom-node-caret 
-                                           anchor-offset
-                                           focus-dom-node-caret
-                                           focus-offset)))))))
+          (assert (and (not= nil anchor-text-node) (not= nil focus-text-node)) "The caret cannot contain nil text nodes")
+          (when (not-nil? anchor-text-node)
+            (.select (grange/createFromNodes (.-firstChild anchor-text-node) 
+                                             anchor-offset
+                                             (.-firstChild focus-text-node)
+                                             focus-offset))
+            )
+          )))))
 
 
 
@@ -387,7 +402,13 @@
                                                 (dom/td nil (:anchor-offset data)))
                                         (dom/tr nil
                                                 (dom/td nil ":is-collapsed")
-                                                (dom/td nil (str (:is-collapsed data)))))))))
+                                                (dom/td nil (str (:is-collapsed data))))
+                                        (dom/tr nil
+                                                (dom/td nil ":anchor-text-node")
+                                                (dom/td nil (str (:anchor-text-node data))))
+                                        (dom/tr nil
+                                                (dom/td nil ":focus-text-node")
+                                                (dom/td nil (str (:focus-text-node data)))))))))
 
 ;; Om Roots
 

@@ -24,8 +24,30 @@
                           :anchor-path []
                           :is-collapsed true }}))
 
+(def data5 (atom {:dom [
+                        [:pre#scott {} 
+                         [:span.test {} "hello1"] 
+                         [:span "hello2"]
+                         [:div 
+                          [:p {:class-name "hah"} "blah blah blah"]]]
+                        ]
+                  :caret {:focus-path []
+                          :focus-offset 0
+                          :anchor-offset 0
+                          :anchor-path []
+                          :is-collapsed true
+                          :focus-text-node nil
+                          :anchor-text-node nil}}))
+
 (defn run-tests []
-  (edtr/remove-node data4 [1])
+  #_(edtr/remove-node data4 [1])
+  (println (edtr/hiccup-has-children? [:div]))
+  (println (edtr/hiccup-has-children? [:div "hello1"]))
+  (println (edtr/hiccup-has-children? [:div {:class "aya"} "hello1"]))
+  (println (edtr/hiccup-has-children? [:div "test1" "test2" [:pre "pre"] "test3"]))
+  (println (edtr/hiccup-has-children? [:div {:class "gig"}]))
+  (println (edtr/hiccup-has-children? [:div {:class "ta"} [:span "hey"] [:pre {:class "h"} "har"]]))
+  
   )
 
 
@@ -34,7 +56,7 @@
 ;; om roots
 
 (let [click-chan (chan)]
-  (om/root edtr/comp-richeditor data4
+  (om/root edtr/comp-richeditor data5
            {:target (. js/document (getElementById "editor"))
             :shared {:click-chan click-chan   ;; Notifies the richeditor when clicks happen on a terminal node
                      }
@@ -43,11 +65,11 @@
                          nil)}))
 
 
-(om/root edtr/comp-caret data4
+(om/root edtr/comp-caret data5
          {:target (. js/document (getElementById "caret"))
           :path [:caret]})
 
-(om/root edtr/comp-richeditor data4
+#_(om/root edtr/comp-richeditor data5
          {:target (. js/document (getElementById "viewer"))
           :opts {:readonly true}})
 
